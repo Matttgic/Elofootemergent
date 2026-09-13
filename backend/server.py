@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 from scoring import analyze_team, scoring_config, paris_date
 from signals import build_signals, head_to_head
 from player_scoring import analyze_player, player_scoring_config
-from understat_client import UNDERSTAT_LEAGUES
+from player_form import compute_recent_form
+from understat_client import UNDERSTAT_LEAGUES, fetch_player_matches
 from ingest import run_ingest, configured_codes, COMPETITION_META
 from football_client import get_token
 
@@ -112,6 +113,34 @@ async def _top_players(team_id, code, limit=4, min_minutes=90):
     analyzed = [analyze_player(d) for d in docs]
     analyzed.sort(key=lambda p: p["scores"]["global"]["score"], reverse=True)
     return analyzed[:limit]
+
+
+async def get_player_form(pid):
+    """Forme récente d'un joueur, avec cache (18h) dans player_form."""
+    from datetime import timedelta
+    doc = await db.player_form.find_one({"_id": pid})
+    if doc:
+        try:
+            age = datetime.now(timezone.utc) - datetime.fromisoformat(doc["updated_at"])
+            if age < timedelta(hours=18):
+                return doc.get("data")
+        except Exception:  # noqa: BLE001
+            pass
+    pdoc = await db.players.find_one({"player_id": pid}, {"_id": 0, "team_title": 1})
+    if not pdoc:
+        return doc.get("data") if doc else None
+    try:
+        matches = await fetch_player_matches(pid)
+        data = compute_recent_form(matches, pdoc.get("team_title"))
+    except Exception as e:  # noqa: BLE001
+        logger.error("Forme joueur %s échec: %s", pid, e)
+        return doc.get("data") if doc else None
+    await db.player_form.update_one(
+        {"_id": pid},
+        {"$set": {"_id": pid, "updated_at": datetime.now(timezone.utc).isoformat(), "data": data}},
+        upsert=True,
+    )
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +319,19 @@ async def player(player_id: str):
         raise HTTPException(404, "Joueur introuvable")
     a = analyze_player(d)
     a["competition_nom"] = COMPETITION_META.get(d["competition_code"], {}).get("nom")
+    a["forme_recente"] = await get_player_form(player_id)
     return a
+
+
+@api_router.post("/players/form")
+async def players_form(payload: dict):
+    ids = payload.get("ids") or []
+    out = {}
+    for pid in ids[:12]:
+        data = await get_player_form(str(pid))
+        if data:
+            out[str(pid)] = data
+    return out
 
 
 @api_router.get("/search")

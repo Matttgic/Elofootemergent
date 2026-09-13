@@ -31,9 +31,11 @@ export function PlayerRow({ player, rank, testid }) {
   );
 }
 
-export function PlayerWatchCard({ player, side, testid }) {
+export function PlayerWatchCard({ player, side, form, testid }) {
   const s = player.stats;
   const slug = (player.nom || "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const formeData = form?.form_score || player.scores.forme;
+  const formeLabel = form ? "Forme récente · détail" : "Forme · détail";
   return (
     <div className="card-surface rounded-xl p-4" data-testid={testid || `player-watch-card-${slug}`}>
       <div className="flex items-center gap-3 mb-3">
@@ -52,10 +54,19 @@ export function PlayerWatchCard({ player, side, testid }) {
         <ScoreBreakdown data={player.scores.creation} title="Score création" team={player.nom}>
           <div><ScoreBar label="Création · détail" score={player.scores.creation.score} /></div>
         </ScoreBreakdown>
-        <ScoreBreakdown data={player.scores.forme} title="Implication (forme)" team={player.nom}>
-          <div><ScoreBar label="Forme · détail" score={player.scores.forme.score} /></div>
+        <ScoreBreakdown data={formeData} title={form ? "Forme récente" : "Implication (forme)"} team={player.nom}>
+          <div><ScoreBar label={formeLabel} score={formeData?.score} testid={`player-forme-${slug}`} /></div>
         </ScoreBreakdown>
       </div>
+      {form?.resume ? (
+        <div className="mt-3 pt-3 border-t border-slate-800 text-xs text-slate-300" data-testid={`player-recent-${slug}`}>
+          <span className="text-emerald-400 font-bold font-stat">{form.resume.buts}</span> buts et{" "}
+          <span className="text-cyan-400 font-bold font-stat">{form.resume.passes}</span> passes sur les{" "}
+          {form.resume.matchs} derniers matchs
+        </div>
+      ) : (
+        <div className="mt-3 pt-3 border-t border-slate-800 text-[11px] text-slate-500">Chargement de la forme récente…</div>
+      )}
       <div className="grid grid-cols-4 gap-1 mt-3 pt-3 border-t border-slate-800 text-center">
         <div><div className="font-stat font-bold text-emerald-400 text-sm">{s.buts}</div><div className="text-[9px] text-slate-500 uppercase">Buts</div></div>
         <div><div className="font-stat font-bold text-cyan-400 text-sm">{s.passes_decisives}</div><div className="text-[9px] text-slate-500 uppercase">P.D.</div></div>

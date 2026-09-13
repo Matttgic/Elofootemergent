@@ -44,12 +44,18 @@ Belgique/Écosse/Turquie non couvertes par l'offre gratuite (omises, extensibles
 - [x] PPL/DED joueurs = "Donnée indisponible" (jamais inventé)
 - [x] Tests 19/19 backend + flows frontend OK
 
+### 2026-09-13 — Forme récente joueur (vrais derniers matchs)
+- [x] Journal match par match via Understat getPlayerMatches ; forme sur les 6 derniers matchs joués, pondération décroissante (récence)
+- [x] POST /api/players/form (cache 18h, cap 12) ; GET /api/player/{id} inclut forme_recente
+- [x] Cartes "Joueurs à surveiller" affichent "X buts et Y passes sur les N derniers matchs" + barre Forme récente cliquable (breakdown buts+passes / xG+xA)
+- [x] Radar de comparaison fiabilisé (outerRadius explicite) ; tests 23/23 backend + frontend OK
+
 ## Backlog priorisé
-- P1 : Forme joueur sur derniers matchs réels (player matchesData Understat) au lieu de l'agrégat saison
 - P1 : Cache des analyses par championnat (perf leaderboard toutes ligues)
+- P2 : Fiche joueur dédiée (page) avec évolution de forme
 - P2 : Données joueurs pour Portugal/Pays-Bas si source gratuite trouvée
 - P2 : Ajout championnats (Belgique/Écosse/Turquie) si source dispo
-- P2 : Page joueur dédiée, favoris, thème clair, filtre statut (à venir/terminés)
+- P2 : Filtre par poste sur le classement joueurs, favoris, thème clair
 
 ## Prochaines actions
 Voir Next Action Items du récap de finish.

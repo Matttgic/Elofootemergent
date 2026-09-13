@@ -99,11 +99,20 @@ export default function MatchDetail() {
   const { id } = useParams();
   const [d, setD] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [formMap, setFormMap] = useState({});
 
   useEffect(() => {
     setLoading(true);
+    setFormMap({});
     api.get(`/match/${id}`).then((r) => setD(r.data)).catch(() => setD(null)).finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    if (!d?.joueurs?.disponible) return;
+    const ids = [...(d.joueurs.domicile || []), ...(d.joueurs.exterieur || [])].map((p) => p.player_id);
+    if (!ids.length) return;
+    api.post("/players/form", { ids }).then((r) => setFormMap(r.data || {})).catch(() => {});
+  }, [d]);
 
   if (loading) return <div className="max-w-5xl mx-auto px-4 py-6 space-y-4"><Skeleton className="h-40 rounded-xl bg-slate-800/50" /><Skeleton className="h-64 rounded-xl bg-slate-800/50" /></div>;
   if (!d) return <div className="max-w-5xl mx-auto px-4 py-10 text-center text-slate-400">Match introuvable.</div>;
@@ -212,7 +221,7 @@ export default function MatchDetail() {
                 <div className="text-sm font-semibold text-emerald-400 mb-2">{m.home_team?.shortName || m.home_team?.name}</div>
                 <div className="space-y-3">
                   {(d.joueurs.domicile || []).length
-                    ? d.joueurs.domicile.map((p) => <PlayerWatchCard key={p.player_id} player={p} side="home" />)
+                    ? d.joueurs.domicile.map((p) => <PlayerWatchCard key={p.player_id} player={p} side="home" form={formMap[p.player_id]} />)
                     : <DataUnavailable label="Aucun joueur avec assez de minutes" />}
                 </div>
               </div>
@@ -220,7 +229,7 @@ export default function MatchDetail() {
                 <div className="text-sm font-semibold text-cyan-400 mb-2">{m.away_team?.shortName || m.away_team?.name}</div>
                 <div className="space-y-3">
                   {(d.joueurs.exterieur || []).length
-                    ? d.joueurs.exterieur.map((p) => <PlayerWatchCard key={p.player_id} player={p} side="away" />)
+                    ? d.joueurs.exterieur.map((p) => <PlayerWatchCard key={p.player_id} player={p} side="away" form={formMap[p.player_id]} />)
                     : <DataUnavailable label="Aucun joueur avec assez de minutes" />}
                 </div>
               </div>

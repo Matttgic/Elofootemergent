@@ -37,3 +37,14 @@ async def fetch_players(league_key: str, season: int):
     if not data.get("success"):
         raise RuntimeError(f"Understat: réponse invalide pour {league_key}/{season}")
     return data.get("players", [])
+
+
+async def fetch_player_matches(player_id: str):
+    """Journal match par match d'un joueur (toutes saisons, du plus récent au plus ancien)."""
+    url = f"{BASE}/main/getPlayerMatches/{player_id}"
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(url, headers={**HEADERS, "Referer": f"{BASE}/player/{player_id}"}, data={})
+        r.raise_for_status()
+        data = r.json()
+    resp = data.get("response", data)
+    return resp.get("matches", []) if isinstance(resp, dict) else []

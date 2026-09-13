@@ -269,3 +269,53 @@ def test_scoring_config(s):
     jo = d["joueurs"]
     for k in ("source", "couverture", "normalisation", "score_joueur", "references_par_90"):
         assert k in jo
+
+
+
+# ---- /players/form  (forme récente)
+def test_players_form_single_raphinha(s):
+    r = s.post(f"{API}/players/form", json={"ids": ["8026"]}, timeout=120)
+    assert r.status_code == 200
+    d = r.json()
+    assert "8026" in d, f"Raphinha (8026) missing in response: {list(d.keys())}"
+    p = d["8026"]
+    assert set(p.keys()) >= {"form_score", "resume", "matchs"}
+    fs = p["form_score"]
+    assert 0 <= fs["score"] <= 100
+    total = sum(c.get("contribution", 0) for c in fs["composantes"])
+    assert abs(total - fs["score"]) <= 2, f"components sum {total} vs score {fs['score']}"
+    resume = p["resume"]
+    for k in ("matchs", "buts", "passes", "minutes"):
+        assert k in resume
+    assert resume["matchs"] >= 1 and resume["matchs"] <= 6
+    assert isinstance(p["matchs"], list) and len(p["matchs"]) == resume["matchs"]
+    for m in p["matchs"]:
+        assert {"date", "adversaire", "lieu", "buts", "passes", "resultat"} <= set(m.keys())
+
+
+def test_players_form_multiple(s):
+    ids = ["8026", "6552", "227", "838", "447", "1250", "5555", "9999"]
+    r = s.post(f"{API}/players/form", json={"ids": ids}, timeout=180)
+    assert r.status_code == 200
+    d = r.json()
+    # at least some valid ids should return data
+    assert len(d) >= 1
+    for pid, p in d.items():
+        assert "form_score" in p and 0 <= p["form_score"]["score"] <= 100
+
+
+def test_players_form_invalid_id(s):
+    r = s.post(f"{API}/players/form", json={"ids": ["nonexistent_zzz_123"]}, timeout=60)
+    assert r.status_code == 200
+    d = r.json()
+    assert "nonexistent_zzz_123" not in d
+
+
+def test_player_detail_includes_forme_recente(s):
+    r = s.get(f"{API}/player/8026", timeout=120)
+    assert r.status_code == 200
+    d = r.json()
+    assert "forme_recente" in d
+    fr = d["forme_recente"]
+    assert fr is not None, "forme_recente should not be None for Raphinha"
+    assert "form_score" in fr and "resume" in fr and "matchs" in fr
