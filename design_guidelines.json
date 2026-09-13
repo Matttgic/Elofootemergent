@@ -1,0 +1,128 @@
+{
+  "app_identity": {
+    "name": "FootPulse Analytics Pro",
+    "tagline": "Système de notation statistique avancée et analyse tactique des matchs de football européens",
+    "language": "fr",
+    "app_type": "dashboard (sports analytics dashboard, mobile-first)",
+    "archetype": "THE PERFORMANCE PRO / TACTICAL MINIMALISM",
+    "emotional_tone": "Precise, authoritative, tactical, high-speed, transparent"
+  },
+  "color_system": {
+    "mode": "dark_primary_with_light_support",
+    "forbidden_colors": ["#7351B7", "generic purple", "teal blue #1B93A4"],
+    "palette": {
+      "background": {
+        "primary": "#0B0E14",
+        "secondary": "#121724",
+        "card": "#161C2E",
+        "card_hover": "#1D253B",
+        "overlay": "rgba(11, 14, 20, 0.85)"
+      },
+      "brand_primary": {
+        "emerald_pitch": "#10B981",
+        "emerald_glow": "#059669",
+        "emerald_light": "#34D399"
+      },
+      "accents": {
+        "tactical_cyan": "#06B6D4",
+        "volt_gold": "#F59E0B",
+        "danger_crimson": "#EF4444",
+        "subtle_blue": "#3B82F6"
+      },
+      "neutrals": {
+        "text_primary": "#F8FAFC",
+        "text_secondary": "#94A3B8",
+        "text_muted": "#64748B",
+        "border": "#1E293B",
+        "border_subtle": "#334155"
+      },
+      "rating_scores": {
+        "elite_90_100": "#10B981",
+        "high_75_89": "#34D399",
+        "average_50_74": "#F59E0B",
+        "low_0_49": "#EF4444"
+      }
+    }
+  },
+  "typography": {
+    "headings_font": "Barlow, Outfit, sans-serif (Condensed / SemiBold / Bold)",
+    "body_font": "Inter, DM Sans, sans-serif",
+    "mono_font": "JetBrains Mono, monospace (for stats & ratings)",
+    "scale": {
+      "h1": "text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight",
+      "h2": "text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight",
+      "h3": "text-lg sm:text-xl font-semibold",
+      "card_title": "text-base sm:text-lg font-bold",
+      "metric_large": "text-2xl sm:text-3xl font-black font-mono",
+      "metric_badge": "text-xs sm:text-sm font-bold font-mono",
+      "body": "text-sm sm:text-base leading-relaxed",
+      "caption": "text-xs font-medium text-slate-400"
+    }
+  },
+  "layout_and_spacing": {
+    "strategy": "High Density Grid (Mode B) + Mobile-First Stack",
+    "max_width": "max-w-7xl mx-auto px-3 sm:px-6 lg:px-8",
+    "grid_structure": "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 lg:gap-6",
+    "card_padding": "p-3 sm:p-5",
+    "header_height": "h-16 sm:h-20"
+  },
+  "key_features_and_components": {
+    "header_nav": {
+      "description": "Sticky navigation header with dark glassmorphism (backdrop-blur-xl bg-[#0B0E14]/90), search bar, quick league selector, date picker, and dark/light toggle.",
+      "leagues": ["Tous", "Ligue 1", "Premier League", "La Liga", "Serie A", "Bundesliga", "Champions League"]
+    },
+    "match_card": {
+      "description": "Compact and detailed match card displaying Home vs Away, 0-100 Rating score, Attack/Defense/Form bars, signals badge, and quick access to match breakdown modal.",
+      "ratings": ["Global", "Offensif", "Défensif", "Forme", "Domicile/Extérieur"]
+    },
+    "match_comparison_view": {
+      "description": "Full screen modal or sub-view for side-by-side comparison of 2 teams: Radar chart of stats (Tirs, xG, Possession, Discipline, Forme), Head-to-head history, Key players to watch, and transparency breakdown."
+    },
+    "market_analysis_signals": {
+      "description": "Dedicated section showing statistical market signals (Over/Under 2.5, BTTS - Les deux équipes marquent, Clean Sheet, Avantage Domicile) with clear 'POURQUOI' explanations.",
+      "signal_types": ["Plus de 2.5 Buts (Over)", "Les deux équipes marquent (BTTS)", "Clean Sheet (Cage inviolée)", "Avantage Domicile Significatif"]
+    },
+    "players_to_watch": {
+      "description": "Key player spotlights showing key metrics (Buts, Passes D., xG/90, Tirs cadrés/90, Rating /100). Includes 'Donnée indisponible' badge if stat is missing."
+    },
+    "score_transparency_modal": {
+      "description": "On click of any score/100, displays transparent math breakdown showing exact weighted parameters (e.g. Score Offensif = xG (40%) + Tirs cadrés (30%) + Buts/match (30%))."
+    },
+    "team_score_evolution": {
+      "description": "Sparkline and interactive line chart showing score progression over last 5 to 10 matches."
+    },
+    "leaderboards": {
+      "description": "Tabs for Best Teams (Meilleures Équipes) and Top Players (Meilleurs Joueurs) sorted by Stat Rating /100."
+    },
+    "unavailable_data_badge": {
+      "label": "Donnée indisponible",
+      "style": "bg-slate-800 text-slate-400 border border-slate-700 text-xs px-2 py-0.5 rounded font-mono"
+    }
+  },
+  "image_urls": {
+    "stadium_banner": "https://images.unsplash.com/photo-1434648957308-5e6a859697e8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwxfHxmb290YmFsbCUyMG1hdGNoJTIwc3RhZGl1bSUyMGFjdGlvbiUyMHBsYXllcnxlbnwwfHx8fDE3ODkzMjcxMDd8MA&ixlib=rb-4.1.0&q=85",
+    "player_action": "https://images.unsplash.com/photo-1560272564-c83b66b1ad12?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwzfHxmb290YmFsbCUyMG1hdGNoJTIwc3RhZGl1bSUyMGFjdGlvbiUyMHBsYXllcnxlbnwwfHx8fDE3ODkzMjcxMDd8MA&ixlib=rb-4.1.0&q=85",
+    "night_stadium": "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwyfHxmb290YmFsbCUyMG1hdGNoJTIwc3RhZGl1bSUyMGFjdGlvbiUyMHBsYXllcnxlbnwwfHx8fDE3ODkzMjcxMDd8MA&ixlib=rb-4.1.0&q=85"
+  },
+  "testing_and_accessibility": {
+    "data_testid_rules": "All interactive elements, match cards, filters, rating badges, search inputs, modal triggers, and buttons MUST contain unique descriptive data-testid attributes (kebab-case).",
+    "examples": [
+      "data-testid=\"league-filter-ligue1\"",
+      "data-testid=\"match-card-psg-om\"",
+      "data-testid=\"score-breakdown-offensif-psg\"",
+      "data-testid=\"market-signal-over-25\"",
+      "data-testid=\"search-input-team-player\"",
+      "data-testid=\"player-watch-card-mbappe\""
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Ensure all text is strictly in French as requested ('Interface en français').",
+    "Never use generic purple (#7351B7 or any purple tint). Use tactical emerald (#10B981), cyan (#06B6D4), obsidian (#0B0E14), slate, and gold accents.",
+    "Ensure high contrast on all text and rating badges (APCA/WCAG compliant).",
+    "Mobile-first responsive design is mandatory. Test on mobile viewports with sticky category tabs.",
+    "Do NOT generate fictional fake data without label. If a statistic is unavailable or missing, show the badge 'Donnée indisponible'.",
+    "Implement clickable transparent score breakdowns so users can see how scores out of 100 are derived.",
+    "Use lucide-react or @phosphor-icons/react for modern, crisp technical icons.",
+    "Add data-testid attributes to all interactive and key informational components."
+  ]
+}

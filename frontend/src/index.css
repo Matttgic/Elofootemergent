@@ -1,0 +1,78 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Barlow:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 29% 6%;
+    --foreground: 210 40% 98%;
+    --card: 225 35% 13%;
+    --card-foreground: 210 40% 98%;
+    --popover: 224 33% 9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 160 84% 39%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 225 22% 18%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 225 22% 18%;
+    --muted-foreground: 215 18% 62%;
+    --accent: 190 90% 43%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 217 30% 17%;
+    --input: 217 30% 17%;
+    --ring: 160 84% 39%;
+    --chart-1: 160 84% 39%;
+    --chart-2: 190 90% 43%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 0 84% 60%;
+    --chart-5: 217 91% 60%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  html { scroll-behavior: smooth; }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', sans-serif;
+    background-image:
+      radial-gradient(circle at 15% 0%, rgba(16,185,129,0.08), transparent 40%),
+      radial-gradient(circle at 85% 10%, rgba(6,182,212,0.06), transparent 40%);
+    background-attachment: fixed;
+  }
+}
+
+.font-head { font-family: 'Barlow Condensed', 'Barlow', sans-serif; letter-spacing: -0.01em; }
+.font-stat { font-family: 'JetBrains Mono', monospace; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1E293B; border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+::selection { background: rgba(16,185,129,0.35); color: #fff; }
+
+.glass {
+  background: rgba(11,14,20,0.85);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.card-surface {
+  background: #161C2E;
+  border: 1px solid #1E293B;
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+.card-surface:hover {
+  border-color: #334155;
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px -12px rgba(0,0,0,0.6);
+}
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+.fade-up { animation: fadeUp .45s cubic-bezier(.22,1,.36,1) both; }
