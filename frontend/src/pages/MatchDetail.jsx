@@ -5,6 +5,7 @@ import { ScoreBadge } from "../components/ScoreBadge";
 import { ScoreBar } from "../components/ScoreBar";
 import { ScoreBreakdown } from "../components/ScoreBreakdown";
 import { MarketSignals } from "../components/MarketSignals";
+import { PlayerWatchCard } from "../components/PlayerCard";
 import { DataUnavailable } from "../components/DataUnavailable";
 import { FormChips } from "../components/FormChips";
 import { frDate, kickoff, scoreColor } from "../lib/format";
@@ -158,13 +159,13 @@ export default function MatchDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
           <div className="card-surface rounded-xl p-5">
             <h3 className="font-head font-bold text-slate-100 mb-2">Comparaison visuelle</h3>
-            <ResponsiveContainer width="100%" height={260}>
-              <RadarChart data={radarData}>
-                <PolarGrid stroke="#1E293B" />
+            <ResponsiveContainer width="100%" height={300}>
+              <RadarChart data={radarData} outerRadius="72%" cx="50%" cy="50%">
+                <PolarGrid stroke="#334155" />
                 <PolarAngleAxis dataKey="stat" tick={{ fill: "#94A3B8", fontSize: 12 }} />
-                <PolarRadiusAxis domain={[0, 100]} tick={{ fill: "#475569", fontSize: 9 }} />
-                <Radar name={home.nom_court} dataKey="dom" stroke="#10B981" fill="#10B981" fillOpacity={0.35} />
-                <Radar name={away.nom_court} dataKey="ext" stroke="#06B6D4" fill="#06B6D4" fillOpacity={0.25} />
+                <PolarRadiusAxis angle={90} domain={[0, 100]} tickCount={5} tick={{ fill: "#475569", fontSize: 9 }} axisLine={false} />
+                <Radar name={home.nom_court} dataKey="dom" stroke="#10B981" fill="#10B981" fillOpacity={0.4} isAnimationActive={false} />
+                <Radar name={away.nom_court} dataKey="ext" stroke="#06B6D4" fill="#06B6D4" fillOpacity={0.3} isAnimationActive={false} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
               </RadarChart>
             </ResponsiveContainer>
@@ -203,10 +204,34 @@ export default function MatchDetail() {
         <h2 className="font-head text-xl sm:text-2xl font-bold text-slate-50 mb-3 flex items-center gap-2">
           <Users className="w-5 h-5 text-emerald-400" /> Joueurs à surveiller
         </h2>
-        <div className="card-surface rounded-xl p-6 text-center" data-testid="players-section">
-          <DataUnavailable label="Données joueurs indisponibles" />
-          <p className="text-sm text-slate-400 mt-3 max-w-md mx-auto">{d.joueurs?.message}</p>
-        </div>
+        {d.joueurs?.disponible ? (
+          <div data-testid="players-section">
+            <p className="text-xs text-slate-500 mb-3">{d.joueurs.source}</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <div className="text-sm font-semibold text-emerald-400 mb-2">{m.home_team?.shortName || m.home_team?.name}</div>
+                <div className="space-y-3">
+                  {(d.joueurs.domicile || []).length
+                    ? d.joueurs.domicile.map((p) => <PlayerWatchCard key={p.player_id} player={p} side="home" />)
+                    : <DataUnavailable label="Aucun joueur avec assez de minutes" />}
+                </div>
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-cyan-400 mb-2">{m.away_team?.shortName || m.away_team?.name}</div>
+                <div className="space-y-3">
+                  {(d.joueurs.exterieur || []).length
+                    ? d.joueurs.exterieur.map((p) => <PlayerWatchCard key={p.player_id} player={p} side="away" />)
+                    : <DataUnavailable label="Aucun joueur avec assez de minutes" />}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="card-surface rounded-xl p-6 text-center" data-testid="players-section">
+            <DataUnavailable label="Données joueurs indisponibles" />
+            <p className="text-sm text-slate-400 mt-3 max-w-md mx-auto">{d.joueurs?.message}</p>
+          </div>
+        )}
       </div>
 
       {/* Head to head */}

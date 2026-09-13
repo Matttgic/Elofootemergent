@@ -45,10 +45,25 @@ export default function Search() {
           )}
 
           <h2 className="font-head font-bold text-slate-200 mb-2">Joueurs</h2>
-          <div className="card-surface rounded-xl p-6 text-center">
-            <DataUnavailable label="Recherche joueurs indisponible" />
-            <p className="text-sm text-slate-400 mt-3">{res?.joueurs?.message}</p>
-          </div>
+          {res?.joueurs?.disponible ? (
+            <div className="space-y-2" data-testid="search-players">
+              {res.joueurs.resultats.map((p) => (
+                <div key={p.player_id} data-testid={`search-player-${p.player_id}`}
+                  className="card-surface rounded-xl p-3 flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-slate-100 text-sm truncate">{p.nom}</div>
+                    <div className="text-xs text-slate-500">{p.poste} · {p.team_title} · {p.competition_nom}</div>
+                  </div>
+                  <span className="font-stat font-bold text-emerald-400">{p.score}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="card-surface rounded-xl p-6 text-center">
+              <DataUnavailable label="Aucun joueur trouvé" />
+              <p className="text-sm text-slate-400 mt-3">{res?.joueurs?.message}</p>
+            </div>
+          )}
         </>
       )}
     </div>

@@ -137,10 +137,99 @@ def test_leaderboard_teams_all(s):
     assert isinstance(r.json(), list)
 
 
-def test_leaderboard_players_unavailable(s):
-    r = s.get(f"{API}/leaderboard/players", timeout=30)
+def test_leaderboard_players_all(s):
+    r = s.get(f"{API}/leaderboard/players", timeout=60)
     assert r.status_code == 200
-    assert r.json()["disponible"] is False
+    d = r.json()
+    assert d["disponible"] is True
+    assert d["min_minutes"] == 180
+    players = d["joueurs"]
+    assert isinstance(players, list) and len(players) > 0
+    # sorted desc by scores.global.score
+    scores = [p["scores"]["global"]["score"] for p in players]
+    assert scores == sorted(scores, reverse=True)
+    # verify Raphinha/Yamal/Mbappe are in top region
+    names = [p["nom"].lower() for p in players[:30]]
+    top_hits = sum(1 for tgt in ("raphinha", "yamal", "mbapp") if any(tgt in n for n in names))
+    assert top_hits >= 2, f"expected 2/3 stars in top 30, got names: {names[:15]}"
+
+
+def test_leaderboard_players_by_code_pl(s):
+    r = s.get(f"{API}/leaderboard/players?code=PL", timeout=60)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["disponible"] is True
+    assert all(p["competition_code"] == "PL" for p in d["joueurs"])
+
+
+def test_leaderboard_players_ppl_unavailable(s):
+    r = s.get(f"{API}/leaderboard/players?code=PPL", timeout=30)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["disponible"] is False
+    assert "message" in d
+
+
+def test_player_detail_and_breakdown(s):
+    # pick top of PL leaderboard
+    lb = s.get(f"{API}/leaderboard/players?code=PL", timeout=60).json()
+    pid = lb["joueurs"][0]["player_id"]
+    r = s.get(f"{API}/player/{pid}", timeout=30)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["nom"]
+    # stats
+    stats = d["stats"]
+    for k in ("buts", "passes_decisives", "tirs", "occasions_creees", "xG", "xA",
+              "cartons_jaunes", "cartons_rouges", "buts_par_90", "minutes"):
+        assert k in stats, f"missing stat {k}"
+    # scores structure
+    for k in ("global", "buteur", "creation", "offensif", "forme"):
+        block = d["scores"][k]
+        assert 0 <= block["score"] <= 100
+        assert isinstance(block["composantes"], list) and len(block["composantes"]) > 0
+    # sum of global contributions ≈ score
+    gb = d["scores"]["global"]
+    total = sum(c.get("contribution", 0) for c in gb["composantes"])
+    assert abs(total - gb["score"]) <= 2
+
+
+def test_match_players_available_pl(s):
+    r = s.get(f"{API}/match/560578", timeout=60)
+    assert r.status_code == 200
+    d = r.json()
+    j = d["joueurs"]
+    assert j["disponible"] is True
+    assert len(j["domicile"]) > 0 and len(j["exterieur"]) > 0
+    # sorted desc by score
+    for side in ("domicile", "exterieur"):
+        scores = [p["scores"]["global"]["score"] for p in j[side]]
+        assert scores == sorted(scores, reverse=True)
+
+
+def test_match_players_unavailable_ded(s):
+    # pick a DED match
+    dates = s.get(f"{API}/dates?code=DED", timeout=30).json()
+    m = s.get(f"{API}/matches?code=DED&date={dates[0]}", timeout=60).json()
+    assert m["matchs"]
+    mid = m["matchs"][0]["match_id"]
+    r = s.get(f"{API}/match/{mid}", timeout=60)
+    assert r.status_code == 200
+    j = r.json()["joueurs"]
+    assert j["disponible"] is False
+    assert j.get("message")
+
+
+def test_search_players(s):
+    r = s.get(f"{API}/search?q=Mbapp", timeout=30)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["joueurs"]["disponible"] is True
+    res = d["joueurs"]["resultats"]
+    assert len(res) > 0
+    p = res[0]
+    for k in ("player_id", "nom", "poste", "team_title", "score"):
+        assert k in p
 
 
 # ---- /team
@@ -164,7 +253,7 @@ def test_search(s):
     assert r.status_code == 200
     d = r.json()
     assert "equipes" in d
-    assert d["joueurs"]["disponible"] is False
+    assert "joueurs" in d
 
 
 # ---- /scoring/config
@@ -172,7 +261,11 @@ def test_scoring_config(s):
     r = s.get(f"{API}/scoring/config", timeout=30)
     assert r.status_code == 200
     d = r.json()
+    assert "equipes" in d and "joueurs" in d
+    eq = d["equipes"]
     for k in ("score_global", "score_offensif", "score_defensif", "donnees_indisponibles"):
-        assert k in d
-    # weights sum to 1
-    assert abs(sum(d["score_global"].values()) - 1.0) < 1e-6
+        assert k in eq
+    assert abs(sum(eq["score_global"].values()) - 1.0) < 1e-6
+    jo = d["joueurs"]
+    for k in ("source", "couverture", "normalisation", "score_joueur", "references_par_90"):
+        assert k in jo

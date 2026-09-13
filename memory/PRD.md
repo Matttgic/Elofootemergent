@@ -28,23 +28,28 @@ Belgique/Écosse/Turquie non couvertes par l'offre gratuite (omises, extensibles
 - Scores domicile/extérieur = même calcul filtré par lieu.
 - Signaux : Over 2.5/1.5, Under 2.5, BTTS, avantage domicile, clean sheet — avec explication chiffrée + confiance.
 
-## Implémenté (2026-09-13)
-- [x] Ingestion réelle (2364 matchs, 7 ligues) + scheduler quotidien
+## Implémenté
+### 2026-09-13 — MVP équipes
+- [x] Ingestion réelle (football-data.org, 2364 matchs, 7 ligues) + scheduler quotidien
 - [x] Scores équipes /100 (global/off/def/forme/domicile/extérieur) + breakdown transparent
-- [x] Page d'accueil : matchs du jour, filtres championnat/date, cartes de match
-- [x] Page détail match : comparaison, radar, avantages, signaux marché, h2h, joueurs (indisponible)
-- [x] Modale de décomposition des scores (transparence)
-- [x] Classements équipes ; classement joueurs (indisponible)
-- [x] Page équipe : stats, graphique d'évolution, historique
-- [x] Recherche équipe ; page méthodologie
-- [x] Tests : 13/13 backend pytest, flows frontend OK
+- [x] Accueil (matchs du jour, filtres championnat/date), détail match (radar, avantages, signaux, h2h)
+- [x] Classement équipes, page équipe (évolution + historique), recherche, méthodologie
+- [x] Tests 13/13 backend
+
+### 2026-09-13 — Ajout statistiques joueurs (Understat)
+- [x] Source joueurs : Understat (endpoint AJAX getPlayersStats), 5 ligues (PL/PD/BL1/SA/FL1), 2042 joueurs
+- [x] Rapprochement automatique équipes Understat <-> football-data (100% matché, alias pour cas limites)
+- [x] Scores joueurs /100 : global, buteur, création, offensif, forme (xGChain) — normalisés /90 min + ajustement au temps de jeu, breakdown transparent
+- [x] "Joueurs à surveiller" par équipe dans le détail match ; classement joueurs ; recherche joueurs ; player detail
+- [x] PPL/DED joueurs = "Donnée indisponible" (jamais inventé)
+- [x] Tests 19/19 backend + flows frontend OK
 
 ## Backlog priorisé
-- P1 : Source complémentaire gratuite pour données joueurs (ex: scraping FBref/understat légal) afin d'activer scores joueurs & "joueurs à surveiller"
+- P1 : Forme joueur sur derniers matchs réels (player matchesData Understat) au lieu de l'agrégat saison
 - P1 : Cache des analyses par championnat (perf leaderboard toutes ligues)
-- P2 : Ajout de championnats (Belgique/Écosse/Turquie) si source dispo
-- P2 : Bascule thème clair, favoris/équipes suivies
-- P2 : Filtre statut (à venir / terminés) sur l'accueil
+- P2 : Données joueurs pour Portugal/Pays-Bas si source gratuite trouvée
+- P2 : Ajout championnats (Belgique/Écosse/Turquie) si source dispo
+- P2 : Page joueur dédiée, favoris, thème clair, filtre statut (à venir/terminés)
 
 ## Prochaines actions
 Voir Next Action Items du récap de finish.

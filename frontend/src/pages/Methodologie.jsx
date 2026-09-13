@@ -31,6 +31,9 @@ export default function Methodologie() {
 
   if (!c) return <div className="max-w-3xl mx-auto px-4 py-6 space-y-4"><Skeleton className="h-32 rounded-xl bg-slate-800/50" /></div>;
 
+  const eq = c.equipes || {};
+  const jo = c.joueurs || {};
+
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-6 py-6">
       <h1 className="font-head text-3xl sm:text-4xl font-extrabold text-slate-50 mb-1 flex items-center gap-2">
@@ -42,7 +45,7 @@ export default function Methodologie() {
         <div className="card-surface rounded-xl p-5">
           <div className="flex items-start gap-3">
             <Scale className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-            <p className="text-sm text-slate-300 leading-relaxed">{c.principe}</p>
+            <p className="text-sm text-slate-300 leading-relaxed">{eq.principe}</p>
           </div>
         </div>
         <div className="card-surface rounded-xl p-5 border-emerald-500/20 bg-emerald-500/5">
@@ -50,23 +53,33 @@ export default function Methodologie() {
             <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
             <div>
               <div className="font-semibold text-emerald-300 text-sm mb-1">Protection anti-biais</div>
-              <p className="text-sm text-slate-300 leading-relaxed">{c.anti_biais}</p>
+              <p className="text-sm text-slate-300 leading-relaxed">{eq.anti_biais}</p>
             </div>
           </div>
         </div>
 
-        <WeightBlock title="Score global — pondération" weights={c.score_global} />
-        <WeightBlock title="Score offensif — pondération" weights={c.score_offensif} />
-        <WeightBlock title="Score défensif — pondération" weights={c.score_defensif} />
+        <h2 className="font-head text-xl font-bold text-slate-100 pt-2">Scores des équipes</h2>
+        <WeightBlock title="Score global — pondération" weights={eq.score_global} />
+        <WeightBlock title="Score offensif — pondération" weights={eq.score_offensif} />
+        <WeightBlock title="Score défensif — pondération" weights={eq.score_defensif} />
+
+        <h2 className="font-head text-xl font-bold text-slate-100 pt-2">Scores des joueurs</h2>
+        <div className="card-surface rounded-xl p-5 space-y-2">
+          <p className="text-sm text-slate-300 leading-relaxed">{jo.source}</p>
+          <p className="text-sm text-slate-400 leading-relaxed">{jo.normalisation}</p>
+          <p className="text-sm text-slate-400 leading-relaxed">{jo.ajustement_echantillon}</p>
+          <p className="text-xs text-slate-500 leading-relaxed">{jo.couverture}</p>
+        </div>
+        <WeightBlock title="Score joueur — pondération" weights={jo.score_joueur} />
 
         <div className="card-surface rounded-xl p-5">
-          <h3 className="font-head font-bold text-slate-100 mb-2">Données indisponibles avec la source gratuite</h3>
+          <h3 className="font-head font-bold text-slate-100 mb-2">Données indisponibles (équipes)</h3>
           <div className="flex flex-wrap gap-2 mb-3">
-            {(c.donnees_indisponibles || []).map((d) => (
+            {(eq.donnees_indisponibles || []).map((d) => (
               <span key={d} className="text-xs bg-slate-800 text-slate-400 border border-slate-700 rounded px-2 py-0.5 font-stat">{d}</span>
             ))}
           </div>
-          <p className="text-xs text-slate-500">{c.note_donnees}</p>
+          <p className="text-xs text-slate-500">{eq.note_donnees}</p>
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import os
+import re
 import asyncio
 import logging
 from pathlib import Path
@@ -11,6 +12,8 @@ from datetime import datetime, timezone
 
 from scoring import analyze_team, scoring_config, paris_date
 from signals import build_signals, head_to_head
+from player_scoring import analyze_player, player_scoring_config
+from understat_client import UNDERSTAT_LEAGUES
 from ingest import run_ingest, configured_codes, COMPETITION_META
 from football_client import get_token
 
@@ -99,6 +102,16 @@ def _match_summary(m):
         "matchday": m.get("matchday"),
         "score": {"home": ft.get("home"), "away": ft.get("away")},
     }
+
+
+async def _top_players(team_id, code, limit=4, min_minutes=90):
+    if team_id is None or code not in UNDERSTAT_LEAGUES:
+        return None
+    docs = await db.players.find({"competition_code": code, "team_id": team_id,
+                                  "minutes": {"$gte": min_minutes}}, {"_id": 0}).to_list(200)
+    analyzed = [analyze_player(d) for d in docs]
+    analyzed.sort(key=lambda p: p["scores"]["global"]["score"], reverse=True)
+    return analyzed[:limit]
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +210,18 @@ async def match_detail(match_id: int):
             "defensif": adv("defensif"), "forme": adv("forme"),
         }
 
+    covered = code in UNDERSTAT_LEAGUES
+    if covered:
+        dom_players = await _top_players(hid, code)
+        ext_players = await _top_players(aid, code)
+        joueurs = {"disponible": True,
+                   "domicile": dom_players or [], "exterieur": ext_players or [],
+                   "source": "Understat · saison en cours"}
+    else:
+        joueurs = {"disponible": False,
+                   "message": f"Statistiques individuelles indisponibles pour {COMPETITION_META.get(code, {}).get('nom', code)} "
+                              "avec les sources gratuites actuelles."}
+
     return {
         "match": {**_match_summary(m),
                   "competition": {"code": code, "nom": COMPETITION_META.get(code, {}).get("nom"),
@@ -209,8 +234,7 @@ async def match_detail(match_id: int):
                                  home["nom_court"] if home else "Domicile",
                                  away["nom_court"] if away else "Extérieur"),
         "confrontations": head_to_head(all_m, hid, aid),
-        "joueurs": {"disponible": False,
-                    "message": "Statistiques individuelles des joueurs indisponibles avec la source gratuite actuelle."},
+        "joueurs": joueurs,
     }
 
 
@@ -241,10 +265,32 @@ async def leaderboard_teams(code: str | None = None):
 
 
 @api_router.get("/leaderboard/players")
-async def leaderboard_players():
-    return {"disponible": False,
-            "message": "Le classement des joueurs nécessite des statistiques individuelles, "
-                       "indisponibles avec la source de données gratuite actuelle."}
+async def leaderboard_players(code: str | None = None, min_minutes: int = 180):
+    codes = [code] if code else list(UNDERSTAT_LEAGUES.keys())
+    codes = [c for c in codes if c in UNDERSTAT_LEAGUES]
+    if not codes:
+        return {"disponible": False,
+                "message": "Statistiques joueurs indisponibles pour ce championnat."}
+    docs = await db.players.find({"competition_code": {"$in": codes},
+                                  "minutes": {"$gte": min_minutes}}, {"_id": 0}).to_list(3000)
+    if not docs:
+        return {"disponible": False,
+                "message": "Données joueurs pas encore synchronisées."}
+    players = [analyze_player(d) for d in docs]
+    for p, d in zip(players, docs):
+        p["competition_nom"] = COMPETITION_META.get(d["competition_code"], {}).get("nom")
+    players.sort(key=lambda p: p["scores"]["global"]["score"], reverse=True)
+    return {"disponible": True, "min_minutes": min_minutes, "joueurs": players[:100]}
+
+
+@api_router.get("/player/{player_id}")
+async def player(player_id: str):
+    d = await db.players.find_one({"player_id": player_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Joueur introuvable")
+    a = analyze_player(d)
+    a["competition_nom"] = COMPETITION_META.get(d["competition_code"], {}).get("nom")
+    return a
 
 
 @api_router.get("/search")
@@ -267,14 +313,24 @@ async def search(q: str = Query(..., min_length=2)):
                                   "nom_court": t.get("shortName"), "logo": t.get("crest"),
                                   "competition_code": c,
                                   "competition_nom": COMPETITION_META.get(c, {}).get("nom")})
+    # joueurs correspondants (Understat)
+    pdocs = await db.players.find({"nom": {"$regex": re.escape(q), "$options": "i"}}, {"_id": 0}).to_list(60)
+    pdocs.sort(key=lambda d: d.get("minutes", 0), reverse=True)
+    joueurs = []
+    for d in pdocs[:20]:
+        a = analyze_player(d)
+        joueurs.append({"player_id": a["player_id"], "nom": a["nom"], "poste": a["poste"],
+                        "team_title": a["team_title"], "competition_code": d["competition_code"],
+                        "competition_nom": COMPETITION_META.get(d["competition_code"], {}).get("nom"),
+                        "score": a["scores"]["global"]["score"]})
     return {"equipes": teams[:30],
-            "joueurs": {"disponible": False,
-                        "message": "Recherche de joueurs indisponible (pas de données individuelles gratuites)."}}
+            "joueurs": {"disponible": bool(joueurs), "resultats": joueurs,
+                        "message": None if joueurs else "Aucun joueur trouvé (couverture : 5 grands championnats)."}}
 
 
 @api_router.get("/scoring/config")
 async def scoring_conf():
-    return scoring_config()
+    return {"equipes": scoring_config(), "joueurs": player_scoring_config()}
 
 
 @api_router.post("/admin/ingest")
@@ -297,6 +353,8 @@ async def _startup_ingest():
     await db.matches.create_index("match_id", unique=True)
     await db.matches.create_index([("competition_code", 1), ("match_date", 1)])
     await db.standings.create_index("competition_code", unique=True)
+    await db.players.create_index([("competition_code", 1), ("team_id", 1)])
+    await db.players.create_index("player_id")
     if get_token():
         nb = await db.matches.count_documents({})
         if nb == 0:

@@ -9,6 +9,7 @@ import os
 from datetime import datetime, timezone
 
 from football_client import FootballDataClient, get_token
+from player_ingest import ingest_players
 from scoring import paris_date
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,15 @@ async def run_ingest(db):
             {"$set": {"_id": "sync", "last_sync": now.isoformat(), **stats}},
             upsert=True,
         )
-        logger.info("Ingestion terminée: %s", stats)
-        return {"ok": True, "synced_at": now.isoformat(), **stats}
+        logger.info("Ingestion équipes terminée: %s", stats)
     finally:
         await client.close()
+
+    try:
+        pstats = await ingest_players(db)
+        logger.info("Ingestion joueurs terminée: %s", pstats)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Ingestion joueurs échouée: %s", e)
+        pstats = {"ok": False}
+
+    return {"ok": True, "synced_at": now.isoformat(), **stats, "joueurs": pstats}

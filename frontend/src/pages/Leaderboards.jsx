@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { ScoreBadge } from "../components/ScoreBadge";
+import { PlayerRow } from "../components/PlayerCard";
 import { FormChips } from "../components/FormChips";
 import { DataUnavailable } from "../components/DataUnavailable";
 import { Skeleton } from "../components/ui/skeleton";
@@ -13,6 +14,8 @@ export default function Leaderboards() {
   const [code, setCode] = useState(null);
   const [teams, setTeams] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [players, setPlayers] = useState(null);
+  const [ploading, setPloading] = useState(true);
 
   useEffect(() => { api.get("/competitions").then((r) => setComps(r.data)).catch(() => {}); }, []);
 
@@ -22,6 +25,12 @@ export default function Leaderboards() {
     api.get("/leaderboard/teams", { params })
       .then((r) => setTeams(r.data)).catch(() => setTeams([])).finally(() => setLoading(false));
   }, [code]);
+
+  useEffect(() => {
+    setPloading(true);
+    api.get("/leaderboard/players")
+      .then((r) => setPlayers(r.data)).catch(() => setPlayers(null)).finally(() => setPloading(false));
+  }, []);
 
   return (
     <div className="max-w-4xl mx-auto px-3 sm:px-6 py-6">
@@ -73,13 +82,25 @@ export default function Leaderboards() {
         </TabsContent>
 
         <TabsContent value="joueurs" className="mt-4">
-          <div className="card-surface rounded-xl p-8 text-center" data-testid="players-leaderboard-unavailable">
-            <DataUnavailable label="Classement joueurs indisponible" />
-            <p className="text-sm text-slate-400 mt-3 max-w-md mx-auto">
-              Le classement des joueurs nécessite des statistiques individuelles (buts, passes, minutes),
-              indisponibles avec la source de données gratuite actuelle. Aucune donnée n'est inventée.
-            </p>
-          </div>
+          {ploading ? (
+            <div className="space-y-2">{[...Array(8)].map((_, i) => <Skeleton key={i} className="h-16 rounded-xl bg-slate-800/50" />)}</div>
+          ) : players?.disponible ? (
+            <>
+              <p className="text-xs text-slate-500 mb-3">
+                Classés par score joueur /100 · min. {players.min_minutes} minutes jouées · source Understat (saison en cours).
+              </p>
+              <div className="space-y-2" data-testid="players-leaderboard">
+                {players.joueurs.map((p, i) => (
+                  <PlayerRow key={p.player_id} player={p} rank={i + 1} testid={`lb-player-${p.player_id}`} />
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="card-surface rounded-xl p-8 text-center" data-testid="players-leaderboard-unavailable">
+              <DataUnavailable label="Classement joueurs indisponible" />
+              <p className="text-sm text-slate-400 mt-3 max-w-md mx-auto">{players?.message || "Données non disponibles."}</p>
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

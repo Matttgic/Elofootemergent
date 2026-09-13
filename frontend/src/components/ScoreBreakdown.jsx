@@ -1,4 +1,4 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "../components/ui/dialog";
 import { scoreColor } from "../lib/format";
 import { DataUnavailable } from "./DataUnavailable";
 import { Info } from "lucide-react";
@@ -15,6 +15,9 @@ export function ScoreBreakdown({ data, title, team, children, testid }) {
             <Info className="w-4 h-4 text-emerald-400" />
             {title} — {team}
           </DialogTitle>
+          <DialogDescription className="text-slate-400 text-xs">
+            Décomposition transparente du score, contribution de chaque critère.
+          </DialogDescription>
         </DialogHeader>
         <div className="flex items-center gap-3 py-2">
           <div className="text-4xl font-black font-stat" style={{ color }}>{data.score}</div>
