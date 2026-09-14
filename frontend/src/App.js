@@ -5,6 +5,7 @@ import Home from "./pages/Home";
 import MatchDetail from "./pages/MatchDetail";
 import TeamPage from "./pages/TeamPage";
 import Leaderboards from "./pages/Leaderboards";
+import Stats from "./pages/Stats";
 import Search from "./pages/Search";
 import Methodologie from "./pages/Methodologie";
 import { Toaster } from "./components/ui/sonner";
@@ -19,6 +20,7 @@ function App() {
           <Route path="/match/:id" element={<MatchDetail />} />
           <Route path="/equipe/:code/:id" element={<TeamPage />} />
           <Route path="/classements" element={<Leaderboards />} />
+          <Route path="/stats" element={<Stats />} />
           <Route path="/recherche" element={<Search />} />
           <Route path="/methodologie" element={<Methodologie />} />
         </Routes>

@@ -6,7 +6,6 @@ import { Skeleton } from "../components/ui/skeleton";
 import { ChevronLeft, ChevronRight, CalendarDays, AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { motion } from "framer-motion";
-import { toast } from "sonner";
 
 function SyncBanner({ status }) {
   if (!status || status.token_present) return null;
@@ -30,7 +29,6 @@ export default function Home() {
   const [date, setDate] = useState(todayISO());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
 
   const loadStatus = useCallback(() => {
     api.get("/status").then((r) => setStatus(r.data)).catch(() => {});
@@ -59,27 +57,6 @@ export default function Home() {
     setDate(d.toLocaleDateString("en-CA"));
   };
 
-  const refresh = () => {
-    if (refreshing) return;
-    setRefreshing(true);
-    toast("Mise à jour des résultats et des notes en cours…");
-    api.post("/admin/ingest").then(() => {
-      let tries = 0;
-      const poll = setInterval(() => {
-        tries += 1;
-        api.get("/status").then((r) => {
-          setStatus(r.data);
-          if (!r.data.synchronisation_en_cours || tries > 40) {
-            clearInterval(poll);
-            setRefreshing(false);
-            loadMatches();
-            if (!r.data.synchronisation_en_cours) toast.success("Données mises à jour ✓");
-          }
-        });
-      }, 5000);
-    }).catch(() => { setRefreshing(false); toast.error("Échec de la mise à jour"); });
-  };
-
   const matchs = data?.matchs || [];
 
   return (
@@ -95,18 +72,14 @@ export default function Home() {
           </p>
         </div>
         {status?.token_present && (
-          <div className="flex items-center gap-3 card-surface rounded-lg px-3 py-2" data-testid="sync-status-bar">
+          <div className="flex items-center gap-2 card-surface rounded-lg px-3 py-2" data-testid="sync-status-bar">
+            <RefreshCw className="w-4 h-4 text-emerald-400 shrink-0" />
             <div className="text-xs text-slate-400 leading-tight">
-              <div>Mise à jour : <span className="text-slate-200 font-medium" data-testid="last-sync-label">
-                {status.synchronisation_en_cours ? "en cours…" : timeAgo(status.derniere_synchro?.last_sync)}
+              <div>Données à jour · <span className="text-slate-200 font-medium" data-testid="last-sync-label">
+                {status.synchronisation_en_cours ? "actualisation…" : timeAgo(status.derniere_synchro?.last_sync)}
               </span></div>
-              <div className="text-[10px] text-slate-500">Automatique toutes les 2 h</div>
+              <div className="text-[10px] text-slate-500">Mise à jour automatique chaque heure</div>
             </div>
-            <Button size="sm" variant="outline" onClick={refresh} disabled={refreshing || status.synchronisation_en_cours}
-              data-testid="btn-refresh" className="border-slate-700 shrink-0">
-              <RefreshCw className={`w-4 h-4 ${(refreshing || status.synchronisation_en_cours) ? "animate-spin" : ""}`} />
-              <span className="ml-1.5 hidden sm:inline">Actualiser</span>
-            </Button>
           </div>
         )}
       </div>

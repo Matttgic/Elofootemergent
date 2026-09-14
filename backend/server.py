@@ -15,7 +15,7 @@ from signals import build_signals, head_to_head
 from player_scoring import analyze_player, player_scoring_config
 from player_form import compute_recent_form
 from understat_client import UNDERSTAT_LEAGUES, fetch_player_matches
-from ingest import run_ingest, run_light_ingest, configured_codes, COMPETITION_META
+from ingest import run_ingest, run_light_ingest, configured_codes, COMPETITION_META, is_cup
 from football_client import get_token
 
 ROOT_DIR = Path(__file__).parent
@@ -277,6 +277,16 @@ async def match_detail(match_id: int):
                    "message": f"Statistiques individuelles indisponibles pour {COMPETITION_META.get(code, {}).get('nom', code)} "
                               "avec les sources gratuites actuelles."}
 
+    # Moyennes réelles du championnat pour calibrer l'estimation de buts
+    lg_home = [ (m.get("score") or {}).get("fullTime", {}).get("home")
+                for m in all_m if m.get("status") == "FINISHED" ]
+    lg_away = [ (m.get("score") or {}).get("fullTime", {}).get("away")
+                for m in all_m if m.get("status") == "FINISHED" ]
+    lg_home = [g for g in lg_home if g is not None]
+    lg_away = [g for g in lg_away if g is not None]
+    lg_home_avg = sum(lg_home) / len(lg_home) if lg_home else 1.45
+    lg_away_avg = sum(lg_away) / len(lg_away) if lg_away else 1.15
+
     return {
         "match": {**_match_summary(m),
                   "competition": {"code": code, "nom": COMPETITION_META.get(code, {}).get("nom"),
@@ -287,7 +297,8 @@ async def match_detail(match_id: int):
         "avantages": avantages,
         "signaux": build_signals(all_m, hid, aid,
                                  home["nom_court"] if home else "Domicile",
-                                 away["nom_court"] if away else "Extérieur"),
+                                 away["nom_court"] if away else "Extérieur",
+                                 lg_home_avg, lg_away_avg),
         "confrontations": head_to_head(all_m, hid, aid),
         "joueurs": joueurs,
     }
@@ -406,13 +417,96 @@ async def scoring_conf():
     return {"equipes": scoring_config(), "joueurs": player_scoring_config()}
 
 
-@api_router.post("/admin/ingest")
-async def admin_ingest():
-    if ingest_state["running"]:
-        return {"started": False, "raison": "deja_en_cours"}
-    # Rafraîchissement léger (1 appel API) : rapide et économe en quota
-    asyncio.create_task(run_light_guarded())
-    return {"started": True}
+STAT_BUCKETS = [(0, 3, "0–3"), (3, 6, "3–6"), (6, 10, "6–10"), (10, 15, "10–15"), (15, 999, "15+")]
+_stats_cache = {}  # code -> (timestamp, data), TTL 10 min
+
+
+@api_router.get("/stats")
+async def stats_analytics(code: str | None = None):
+    """Statistiques descriptives : lien entre l'écart de notes et le résultat réel.
+    Fondé sur les matchs terminés et les notes actuelles des équipes."""
+    from datetime import timedelta
+    ck = code or "ALL"
+    cached = _stats_cache.get(ck)
+    if cached and (datetime.now(timezone.utc) - cached[0]) < timedelta(minutes=10):
+        return cached[1]
+    codes = [code] if code else [c for c in configured_codes() if not is_cup(c)]
+    codes = [c for c in codes if not is_cup(c)]
+    higher = {"V": 0, "N": 0, "D": 0}          # résultat de l'équipe la mieux notée
+    home_out = {"V": 0, "N": 0, "D": 0}        # résultat du point de vue domicile
+    buckets = {b[2]: {"note_sup": 0, "nul": 0, "note_inf": 0} for b in STAT_BUCKETS}
+    total = 0
+
+    for c in codes:
+        all_m, pos_map, rows, meta = await _load_comp(c)
+        ratings = {}
+        for tid in meta:
+            a = _analyze(all_m, pos_map, rows, meta, tid)
+            if a and a.get("global"):
+                ratings[tid] = a["global"]["score"]
+        for m in all_m:
+            if m.get("status") != "FINISHED":
+                continue
+            ft = (m.get("score") or {}).get("fullTime") or {}
+            gh, ga = ft.get("home"), ft.get("away")
+            hid = (m.get("home_team") or {}).get("id")
+            aid = (m.get("away_team") or {}).get("id")
+            if gh is None or ga is None or hid not in ratings or aid not in ratings:
+                continue
+            total += 1
+            home_out["V" if gh > ga else ("N" if gh == ga else "D")] += 1
+            rh, raw = ratings[hid], ratings[aid]
+            if rh == raw:
+                continue
+            diff = abs(rh - raw)
+            sup_is_home = rh > raw
+            if gh == ga:
+                res = "N"
+            elif (gh > ga) == sup_is_home:
+                res = "V"   # l'équipe mieux notée a gagné
+            else:
+                res = "D"   # l'équipe mieux notée a perdu
+            higher[res] += 1
+            for lo, hi, label in STAT_BUCKETS:
+                if lo <= diff < hi:
+                    key = "note_sup" if res == "V" else ("nul" if res == "N" else "note_inf")
+                    buckets[label][key] += 1
+                    break
+
+    def pct(part, whole):
+        return round(part / whole * 100, 1) if whole else None
+
+    h_total = sum(higher.values())
+    par_ecart = []
+    for _, _, label in STAT_BUCKETS:
+        b = buckets[label]
+        n = b["note_sup"] + b["nul"] + b["note_inf"]
+        par_ecart.append({
+            "tranche": label, "matchs": n,
+            "note_sup_gagne_pct": pct(b["note_sup"], n),
+            "nul_pct": pct(b["nul"], n),
+            "note_inf_gagne_pct": pct(b["note_inf"], n),
+        })
+
+    result = {
+        "disponible": total > 0,
+        "echantillon": total,
+        "note_superieure": {
+            "victoires_pct": pct(higher["V"], h_total),
+            "nuls_pct": pct(higher["N"], h_total),
+            "defaites_pct": pct(higher["D"], h_total),
+        },
+        "avantage_domicile": {
+            "domicile_pct": pct(home_out["V"], total),
+            "nul_pct": pct(home_out["N"], total),
+            "exterieur_pct": pct(home_out["D"], total),
+        },
+        "par_ecart_note": par_ecart,
+        "note": "Statistiques descriptives fondées sur les matchs terminés et les notes actuelles "
+                "des équipes (5 grands championnats et autres ligues, hors coupes).",
+    }
+    _stats_cache[ck] = (datetime.now(timezone.utc), result)
+    return result
 
 
 app.include_router(api_router)

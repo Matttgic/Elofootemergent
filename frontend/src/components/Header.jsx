@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { Activity, Search, Trophy, BarChart3, BookOpen } from "lucide-react";
+import { Activity, Search, Trophy, BarChart3, BookOpen, PieChart } from "lucide-react";
 import { Input } from "../components/ui/input";
 
 export function Header() {
@@ -16,6 +16,7 @@ export function Header() {
   const links = [
     { to: "/", label: "Matchs", icon: Activity },
     { to: "/classements", label: "Classements", icon: Trophy },
+    { to: "/stats", label: "Stats", icon: PieChart },
     { to: "/methodologie", label: "Méthode", icon: BookOpen },
   ];
 

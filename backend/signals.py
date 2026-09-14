@@ -25,7 +25,8 @@ def _confiance(margin, faible, eleve):
     return "Faible"
 
 
-def build_signals(matches, home_id, away_id, home_name, away_name):
+def build_signals(matches, home_id, away_id, home_name, away_name,
+                  lg_home_avg=1.45, lg_away_avg=1.15):
     home_all = extract_records(matches, home_id)
     away_all = extract_records(matches, away_id)
     home_at_home = extract_records(matches, home_id, "HOME")
@@ -34,14 +35,20 @@ def build_signals(matches, home_id, away_id, home_name, away_name):
     if not home_all or not away_all:
         return {"disponible": False, "message": "Historique insuffisant pour générer des signaux."}
 
-    # Estimations de buts fondées sur moyennes réelles (domicile/extérieur si dispo)
+    # Modèle de force calibré sur la moyenne réelle du championnat (évite la
+    # surestimation systématique des buts). Chaque espérance est ramenée à la
+    # base de la ligue : un match "moyen" ≈ moyenne du championnat, seuls les
+    # duels attaque forte / défense faible dépassent ce niveau.
+    lg_home_avg = lg_home_avg if lg_home_avg and lg_home_avg > 0.2 else 1.45
+    lg_away_avg = lg_away_avg if lg_away_avg and lg_away_avg > 0.2 else 1.15
+
     h_scored = _avg([r["gf"] for r in (home_at_home or home_all)])
     h_conceded = _avg([r["gc"] for r in (home_at_home or home_all)])
     a_scored = _avg([r["gf"] for r in (away_at_away or away_all)])
     a_conceded = _avg([r["gc"] for r in (away_at_away or away_all)])
 
-    exp_home = (h_scored + a_conceded) / 2
-    exp_away = (a_scored + h_conceded) / 2
+    exp_home = min(3.5, max(0.15, h_scored * a_conceded / lg_home_avg))
+    exp_away = min(3.5, max(0.15, a_scored * h_conceded / lg_away_avg))
     exp_total = exp_home + exp_away
 
     signals = []
