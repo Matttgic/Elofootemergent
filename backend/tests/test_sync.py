@@ -1,4 +1,4 @@
-"""Tests for the auto-update / manual refresh mechanism."""
+"""Tests for the light-refresh / manual refresh mechanism (économique)."""
 import os
 import time
 import pytest
@@ -23,21 +23,31 @@ def s():
     return requests.Session()
 
 
-def test_status_has_new_fields(s):
+def test_status_exposes_frequence_and_quota(s):
     r = s.get(f"{API}/status", timeout=30)
     assert r.status_code == 200
     d = r.json()
     assert "synchronisation_en_cours" in d
     assert isinstance(d["synchronisation_en_cours"], bool)
     assert "frequence" in d
-    assert "2 heures" in d["frequence"]
+    freq = d["frequence"]
+    # New wording: "1 appel API" per hour + "analyse complète 1×/jour"
+    assert "1 appel API" in freq
+    assert "1×/jour" in freq or "1x/jour" in freq
+    assert "quota" in d
     assert d["matchs_en_base"] > 0
     sync = d.get("derniere_synchro") or {}
-    assert "last_sync" in sync, f"missing last_sync in derniere_synchro: {sync}"
+    assert "last_sync" in sync
 
 
-def test_admin_ingest_non_blocking_and_guard(s):
-    # Capture previous last_sync
+def test_admin_ingest_light_non_blocking_and_guard(s):
+    # If a sync is currently running, wait briefly for it to end so we own this test.
+    for _ in range(30):
+        st = s.get(f"{API}/status", timeout=30).json()
+        if not st.get("synchronisation_en_cours"):
+            break
+        time.sleep(2)
+
     st0 = s.get(f"{API}/status", timeout=30).json()
     prev_last = (st0.get("derniere_synchro") or {}).get("last_sync")
 
@@ -47,44 +57,35 @@ def test_admin_ingest_non_blocking_and_guard(s):
     assert r1.status_code == 200
     body1 = r1.json()
     assert "started" in body1
-    # Must respond quickly (non-blocking)
-    assert elapsed < 10, f"POST /admin/ingest took {elapsed:.1f}s (should be immediate)"
+    assert elapsed < 5, f"POST /admin/ingest took {elapsed:.1f}s (should be <5s)"
+    assert body1.get("started") is True, f"expected started:true, got {body1}"
 
-    # If not started, it must be because a sync is already running
-    if not body1["started"]:
-        assert body1.get("raison") == "deja_en_cours"
-
-    # A second immediate call should return started:false / deja_en_cours
+    # Immediate second call => started:false / raison:deja_en_cours
     r2 = s.post(f"{API}/admin/ingest", timeout=15)
     assert r2.status_code == 200
     body2 = r2.json()
     assert body2.get("started") is False
     assert body2.get("raison") == "deja_en_cours"
 
-    # Poll status: synchronisation_en_cours should become true quickly (or already true)
-    running_seen = False
-    for _ in range(6):
-        st = s.get(f"{API}/status", timeout=30).json()
-        if st.get("synchronisation_en_cours"):
-            running_seen = True
-            break
-        time.sleep(1)
-    assert running_seen, "synchronisation_en_cours never became True after POST /admin/ingest"
-
-    # Wait for completion (up to ~150s)
+    # Light refresh should complete quickly (few seconds, not 90s).
     completed = False
-    new_last = None
-    for _ in range(30):
-        time.sleep(5)
+    new_sync = None
+    deadline = time.time() + 45
+    while time.time() < deadline:
+        time.sleep(2)
         st = s.get(f"{API}/status", timeout=30).json()
         if not st.get("synchronisation_en_cours"):
+            new_sync = st.get("derniere_synchro") or {}
             completed = True
-            new_last = (st.get("derniere_synchro") or {}).get("last_sync")
             break
-    assert completed, "sync did not finish within ~150s"
-    assert new_last, "last_sync missing after sync"
+    assert completed, "light sync did not finish within 45s"
+    assert new_sync.get("last_sync"), "last_sync missing after sync"
     if prev_last:
-        assert new_last >= prev_last, f"last_sync not updated: {prev_last} -> {new_last}"
+        assert new_sync["last_sync"] >= prev_last
+    # Mode should be "leger" and matchs_maj should be present (>=0, often >0)
+    assert new_sync.get("mode") == "leger", f"expected mode=leger, got {new_sync}"
+    assert "matchs_maj" in new_sync
+    assert isinstance(new_sync["matchs_maj"], int)
 
 
 # ---- quick regression
@@ -113,4 +114,9 @@ def test_leaderboard_players_ok(s):
 
 def test_players_form_ok(s):
     r = s.post(f"{API}/players/form", json={"ids": ["8026"]}, timeout=120)
+    assert r.status_code == 200
+
+
+def test_scoring_config_ok(s):
+    r = s.get(f"{API}/scoring/config", timeout=30)
     assert r.status_code == 200

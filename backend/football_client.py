@@ -55,6 +55,10 @@ class FootballDataClient:
         """All matches of the current season for a league (history + upcoming)."""
         return await self._get(f"/competitions/{code}/matches")
 
+    async def matches_window(self, date_from: str, date_to: str):
+        """Tous les matchs (tous championnats) sur une fenêtre de dates — 1 appel."""
+        return await self._get("/matches", {"dateFrom": date_from, "dateTo": date_to})
+
     async def standings(self, code: str):
         return await self._get(f"/competitions/{code}/standings")
 

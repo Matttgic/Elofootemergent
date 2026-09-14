@@ -6,7 +6,7 @@ individuelle de joueur (non fournie par la source gratuite).
 """
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from football_client import FootballDataClient, get_token
 from player_ingest import ingest_players
@@ -31,6 +31,58 @@ COMPETITION_META = {
 def configured_codes():
     raw = os.environ.get("COMPETITIONS", "PL,PD,SA,BL1,FL1,PPL,DED")
     return [c.strip().upper() for c in raw.split(",") if c.strip() in COMPETITION_META]
+
+
+def _match_doc(item, code, now):
+    udate = item.get("utcDate")
+    return {
+        "match_id": item["id"],
+        "competition_code": code,
+        "utc_date": udate,
+        "match_date": paris_date(udate) if udate else None,
+        "status": item.get("status"),
+        "matchday": item.get("matchday"),
+        "home_team": item.get("homeTeam"),
+        "away_team": item.get("awayTeam"),
+        "score": item.get("score"),
+        "last_synced_at": now.isoformat(),
+    }
+
+
+async def run_light_ingest(db):
+    """Rafraîchissement léger et économe : 1 SEUL appel football-data (/matches sur
+    une fenêtre de dates, tous championnats) pour mettre à jour les résultats récents
+    et recalculer les notes. N'actualise ni les classements ni les joueurs."""
+    token = get_token()
+    if not token:
+        return {"ok": False, "raison": "token_manquant"}
+    client = FootballDataClient(token)
+    now = datetime.now(timezone.utc)
+    start = (now - timedelta(days=2)).date().isoformat()
+    end = (now + timedelta(days=3)).date().isoformat()  # dateTo exclusif côté API
+    allowed = set(configured_codes())
+    count = 0
+    try:
+        payload = await client.matches_window(start, end)
+        for item in payload.get("matches", []):
+            code = (item.get("competition") or {}).get("code")
+            if code not in allowed:
+                continue
+            await db.matches.update_one({"match_id": item["id"]},
+                                        {"$set": _match_doc(item, code, now)}, upsert=True)
+            count += 1
+        await db.meta.update_one(
+            {"_id": "sync"},
+            {"$set": {"_id": "sync", "last_sync": now.isoformat(), "mode": "leger", "matchs_maj": count}},
+            upsert=True,
+        )
+        logger.info("Rafraîchissement léger: %s matchs mis à jour (1 appel API)", count)
+        return {"ok": True, "mode": "leger", "matchs_maj": count, "appels_api": 1}
+    except Exception as e:  # noqa: BLE001
+        logger.error("Rafraîchissement léger échoué: %s", e)
+        return {"ok": False, "raison": str(e)}
+    finally:
+        await client.close()
 
 
 async def run_ingest(db):

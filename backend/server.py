@@ -15,7 +15,7 @@ from signals import build_signals, head_to_head
 from player_scoring import analyze_player, player_scoring_config
 from player_form import compute_recent_form
 from understat_client import UNDERSTAT_LEAGUES, fetch_player_matches
-from ingest import run_ingest, configured_codes, COMPETITION_META
+from ingest import run_ingest, run_light_ingest, configured_codes, COMPETITION_META
 from football_client import get_token
 
 ROOT_DIR = Path(__file__).parent
@@ -37,16 +37,24 @@ scheduler = AsyncIOScheduler(timezone="UTC")
 ingest_state = {"running": False, "started_at": None}
 
 
-async def run_ingest_guarded():
+async def _guarded(factory):
     if ingest_state["running"]:
         logger.info("Ingestion déjà en cours — appel ignoré.")
         return {"ok": False, "raison": "deja_en_cours"}
     ingest_state["running"] = True
     ingest_state["started_at"] = datetime.now(timezone.utc).isoformat()
     try:
-        return await run_ingest(db)
+        return await factory()
     finally:
         ingest_state["running"] = False
+
+
+async def run_full_guarded():
+    return await _guarded(lambda: run_ingest(db))
+
+
+async def run_light_guarded():
+    return await _guarded(lambda: run_light_ingest(db))
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +183,8 @@ async def status():
         "matchs_en_base": nb,
         "derniere_synchro": sync,
         "synchronisation_en_cours": ingest_state["running"],
-        "frequence": "Mise à jour automatique toutes les 2 heures",
+        "frequence": "Résultats rafraîchis chaque heure (1 appel API) · analyse complète 1×/jour",
+        "quota": "≈ 24 appels/jour pour les résultats + 14 pour l'analyse quotidienne — très en deçà de la limite gratuite (10/min)",
         "championnats": configured_codes(),
     }
 
@@ -395,7 +404,8 @@ async def scoring_conf():
 async def admin_ingest():
     if ingest_state["running"]:
         return {"started": False, "raison": "deja_en_cours"}
-    asyncio.create_task(run_ingest_guarded())
+    # Rafraîchissement léger (1 appel API) : rapide et économe en quota
+    asyncio.create_task(run_light_guarded())
     return {"started": True}
 
 
@@ -428,17 +438,23 @@ async def _startup_ingest():
             stale = age > timedelta(hours=3)
         except Exception:  # noqa: BLE001
             stale = True
-    if nb == 0 or stale:
-        logger.info("Données absentes ou périmées — ingestion de rattrapage en arrière-plan.")
-        asyncio.create_task(run_ingest_guarded())
+    if nb == 0:
+        logger.info("Base vide — analyse complète en arrière-plan.")
+        asyncio.create_task(run_full_guarded())
+    elif stale:
+        logger.info("Données périmées — rafraîchissement léger de rattrapage.")
+        asyncio.create_task(run_light_guarded())
 
 
 @app.on_event("startup")
 async def on_startup():
     await _startup_ingest()
-    # Mise à jour automatique toutes les 2 heures (résultats + recalcul des notes)
-    scheduler.add_job(run_ingest_guarded, "cron", hour="*/2", minute=10,
-                      id="ingest", replace_existing=True, max_instances=1, coalesce=True)
+    # Rafraîchissement léger fréquent (1 appel API) pour les résultats + notes
+    scheduler.add_job(run_light_guarded, "cron", minute=5,
+                      id="light", replace_existing=True, max_instances=1, coalesce=True)
+    # Analyse complète 1×/jour (saison + classements + joueurs)
+    scheduler.add_job(run_full_guarded, "cron", hour=4, minute=30,
+                      id="full", replace_existing=True, max_instances=1, coalesce=True)
     scheduler.start()
 
 
