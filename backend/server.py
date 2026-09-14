@@ -417,7 +417,8 @@ async def scoring_conf():
     return {"equipes": scoring_config(), "joueurs": player_scoring_config()}
 
 
-STAT_BUCKETS = [(0, 3, "0–3"), (3, 6, "3–6"), (6, 10, "6–10"), (10, 15, "10–15"), (15, 999, "15+")]
+STAT_BUCKETS = [(0, 5, "0–5"), (5, 10, "5–10"), (10, 15, "10–15"), (15, 20, "15–20"),
+                (20, 25, "20–25"), (25, 30, "25–30"), (30, 999, "30+")]
 _stats_cache = {}  # code -> (timestamp, data), TTL 10 min
 
 
