@@ -33,6 +33,21 @@ logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler(timezone="UTC")
 
+# État de synchronisation (évite les ingestions concurrentes manuel/planifié)
+ingest_state = {"running": False, "started_at": None}
+
+
+async def run_ingest_guarded():
+    if ingest_state["running"]:
+        logger.info("Ingestion déjà en cours — appel ignoré.")
+        return {"ok": False, "raison": "deja_en_cours"}
+    ingest_state["running"] = True
+    ingest_state["started_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        return await run_ingest(db)
+    finally:
+        ingest_state["running"] = False
+
 
 # ---------------------------------------------------------------------------
 # Helpers de chargement / analyse
@@ -159,6 +174,8 @@ async def status():
         "token_present": bool(get_token()),
         "matchs_en_base": nb,
         "derniere_synchro": sync,
+        "synchronisation_en_cours": ingest_state["running"],
+        "frequence": "Mise à jour automatique toutes les 2 heures",
         "championnats": configured_codes(),
     }
 
@@ -376,7 +393,10 @@ async def scoring_conf():
 
 @api_router.post("/admin/ingest")
 async def admin_ingest():
-    return await run_ingest(db)
+    if ingest_state["running"]:
+        return {"started": False, "raison": "deja_en_cours"}
+    asyncio.create_task(run_ingest_guarded())
+    return {"started": True}
 
 
 app.include_router(api_router)
@@ -396,18 +416,29 @@ async def _startup_ingest():
     await db.standings.create_index("competition_code", unique=True)
     await db.players.create_index([("competition_code", 1), ("team_id", 1)])
     await db.players.create_index("player_id")
-    if get_token():
-        nb = await db.matches.count_documents({})
-        if nb == 0:
-            logger.info("Base vide — ingestion initiale lancée en arrière-plan.")
-            asyncio.create_task(run_ingest(db))
+    if not get_token():
+        return
+    from datetime import timedelta
+    nb = await db.matches.count_documents({})
+    stale = True
+    sync = await db.meta.find_one({"_id": "sync"})
+    if sync and sync.get("last_sync"):
+        try:
+            age = datetime.now(timezone.utc) - datetime.fromisoformat(sync["last_sync"])
+            stale = age > timedelta(hours=3)
+        except Exception:  # noqa: BLE001
+            stale = True
+    if nb == 0 or stale:
+        logger.info("Données absentes ou périmées — ingestion de rattrapage en arrière-plan.")
+        asyncio.create_task(run_ingest_guarded())
 
 
 @app.on_event("startup")
 async def on_startup():
     await _startup_ingest()
-    scheduler.add_job(run_ingest, "cron", args=[db], hour=4, minute=10,
-                      id="daily-ingest", replace_existing=True, max_instances=1, coalesce=True)
+    # Mise à jour automatique toutes les 2 heures (résultats + recalcul des notes)
+    scheduler.add_job(run_ingest_guarded, "cron", hour="*/2", minute=10,
+                      id="ingest", replace_existing=True, max_instances=1, coalesce=True)
     scheduler.start()
 
 

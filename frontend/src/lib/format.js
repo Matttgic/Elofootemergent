@@ -51,3 +51,12 @@ export function frDateShort(iso) {
 export function todayISO() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Paris" });
 }
+
+export function timeAgo(iso) {
+  if (!iso) return "jamais";
+  const diff = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return "à l'instant";
+  if (diff < 3600) return `il y a ${Math.floor(diff / 60)} min`;
+  if (diff < 86400) return `il y a ${Math.floor(diff / 3600)} h`;
+  return `il y a ${Math.floor(diff / 86400)} j`;
+}
