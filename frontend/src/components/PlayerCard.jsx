@@ -6,9 +6,11 @@ const Poste = ({ poste }) => (
   <span className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">{poste}</span>
 );
 
-export function PlayerRow({ player, rank, testid }) {
+export function PlayerRow({ player, rank, metric = "global", testid }) {
   const g = player.scores.global;
   const s = player.stats;
+  const trailing = metric === "buts" ? { v: s.buts, c: "#10B981", l: "Buts" }
+    : metric === "passes" ? { v: s.passes_decisives, c: "#06B6D4", l: "Passes" } : null;
   return (
     <ScoreBreakdown data={g} title="Score joueur" team={player.nom} testid={testid}>
       <div className="card-surface rounded-xl p-3 flex items-center gap-3 cursor-pointer">
@@ -25,7 +27,12 @@ export function PlayerRow({ player, rank, testid }) {
           <div><div className="font-stat font-bold text-cyan-400 text-sm">{s.passes_decisives}</div><div className="text-[9px] text-slate-500 uppercase">PD</div></div>
           <div><div className="font-stat font-bold text-slate-300 text-sm">{s.xG}</div><div className="text-[9px] text-slate-500 uppercase">xG</div></div>
         </div>
-        <ScoreBadge score={g.score} size="sm" />
+        {trailing ? (
+          <div className="text-center w-12 shrink-0">
+            <div className="font-stat font-black text-xl" style={{ color: trailing.c }}>{trailing.v}</div>
+            <div className="text-[9px] text-slate-500 uppercase">{trailing.l}</div>
+          </div>
+        ) : <ScoreBadge score={g.score} size="sm" />}
       </div>
     </ScoreBreakdown>
   );

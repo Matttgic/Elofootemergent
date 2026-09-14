@@ -30,7 +30,11 @@ def test_status(s):
     d = r.json()
     assert d["token_present"] is True
     assert d["matchs_en_base"] > 0
-    assert isinstance(d["championnats"], list) and len(d["championnats"]) == 7
+    assert isinstance(d["championnats"], list) and len(d["championnats"]) == 12
+
+
+EXPECTED_CODES = {"PL", "PD", "SA", "BL1", "FL1", "PPL", "DED",
+                  "ELC", "BSA", "CL", "EC", "WC"}
 
 
 # ---- /competitions
@@ -38,10 +42,97 @@ def test_competitions(s):
     r = s.get(f"{API}/competitions", timeout=30)
     assert r.status_code == 200
     d = r.json()
-    assert len(d) == 7
+    assert len(d) == 12
+    codes = {c["code"] for c in d}
+    assert codes == EXPECTED_CODES, f"missing: {EXPECTED_CODES - codes}"
     for c in d:
         assert {"code", "nom", "pays", "nb_matchs"} <= set(c.keys())
-        assert c["nb_matchs"] >= 0
+        assert c["nb_matchs"] > 0, f"{c['code']} has 0 matches"
+
+
+# ---- buteurs / passeurs
+def test_leaderboard_players_buteurs(s):
+    r = s.get(f"{API}/leaderboard/players?tri=buteurs", timeout=60)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["disponible"] is True
+    assert d["tri"] == "buteurs"
+    players = d["joueurs"]
+    assert len(players) > 0
+    goals = [p["stats"]["buts"] for p in players]
+    assert goals == sorted(goals, reverse=True)
+    assert goals[0] >= 3
+
+
+def test_leaderboard_players_passeurs(s):
+    r = s.get(f"{API}/leaderboard/players?tri=passeurs", timeout=60)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["disponible"] is True
+    assert d["tri"] == "passeurs"
+    players = d["joueurs"]
+    assert len(players) > 0
+    assists = [p["stats"]["passes_decisives"] for p in players]
+    assert assists == sorted(assists, reverse=True)
+    assert assists[0] >= 2
+
+
+# ---- Cup competitions (CL/EC/WC): no classement, no players
+def _find_date_with_matches(s, code):
+    dates = s.get(f"{API}/dates?code={code}", timeout=30).json()
+    if not dates:
+        return None
+    # try a few dates to find one with matches
+    for target in [dates[len(dates)//2], dates[0], dates[-1]]:
+        r = s.get(f"{API}/matches?code={code}&date={target}", timeout=60).json()
+        if r.get("matchs"):
+            return target, r["matchs"]
+    return None
+
+
+def test_matches_cup_cl(s):
+    found = _find_date_with_matches(s, "CL")
+    assert found, "No CL matches found on any date"
+    _, matchs = found
+    m = matchs[0]
+    assert "domicile" in m and "exterieur" in m
+    # For cups, classement should be null
+    for side in ("domicile", "exterieur"):
+        t = m[side]
+        if t is not None:
+            assert t.get("classement") is None, f"cup match should have classement=null, got {t.get('classement')}"
+
+
+def test_match_detail_cup_no_players(s):
+    found = _find_date_with_matches(s, "CL")
+    assert found
+    _, matchs = found
+    mid = matchs[0]["match_id"]
+    r = s.get(f"{API}/match/{mid}", timeout=60)
+    assert r.status_code == 200
+    d = r.json()
+    # signals may or may not be available depending on team history
+    assert d["joueurs"]["disponible"] is False
+    for side in ("domicile", "exterieur"):
+        t = d.get(side)
+        if t:
+            assert t.get("classement") is None
+
+
+def test_matches_other_cups_and_leagues(s):
+    # sanity: each of the new codes returns at least one date with matches
+    for code in ("EC", "WC", "BSA", "ELC"):
+        dates = s.get(f"{API}/dates?code={code}", timeout=30).json()
+        assert isinstance(dates, list) and len(dates) > 0, f"{code} no dates"
+
+
+def test_leaderboard_teams_all_includes_new_comps(s):
+    r = s.get(f"{API}/leaderboard/teams", timeout=180)
+    assert r.status_code == 200
+    d = r.json()
+    codes = {t.get("competition_code") for t in d}
+    # league comps should appear; cups have no ranking so may be absent — OK
+    assert "ELC" in codes or "BSA" in codes, f"expected new league in teams leaderboard, got {codes}"
 
 
 # ---- /dates

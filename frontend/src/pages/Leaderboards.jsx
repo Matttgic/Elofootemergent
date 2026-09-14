@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { ScoreBadge } from "../components/ScoreBadge";
@@ -7,15 +7,22 @@ import { FormChips } from "../components/FormChips";
 import { DataUnavailable } from "../components/DataUnavailable";
 import { Skeleton } from "../components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
-import { Trophy, Users } from "lucide-react";
+import { Trophy, Users, Goal, Handshake } from "lucide-react";
+
+const PLAYER_TABS = {
+  joueurs: { tri: "global", metric: "global", note: "score joueur /100" },
+  buteurs: { tri: "buteurs", metric: "buts", note: "nombre de buts (saison en cours)" },
+  passeurs: { tri: "passeurs", metric: "passes", note: "passes décisives (saison en cours)" },
+};
 
 export default function Leaderboards() {
   const [comps, setComps] = useState([]);
   const [code, setCode] = useState(null);
   const [teams, setTeams] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [players, setPlayers] = useState(null);
-  const [ploading, setPloading] = useState(true);
+  const [tab, setTab] = useState("equipes");
+  const [playersByTri, setPlayersByTri] = useState({});
+  const [ploading, setPloading] = useState(false);
 
   useEffect(() => { api.get("/competitions").then((r) => setComps(r.data)).catch(() => {}); }, []);
 
@@ -26,24 +33,68 @@ export default function Leaderboards() {
       .then((r) => setTeams(r.data)).catch(() => setTeams([])).finally(() => setLoading(false));
   }, [code]);
 
-  useEffect(() => {
+  const loadPlayers = useCallback((tri) => {
+    if (playersByTri[tri]) return;
     setPloading(true);
-    api.get("/leaderboard/players")
-      .then((r) => setPlayers(r.data)).catch(() => setPlayers(null)).finally(() => setPloading(false));
-  }, []);
+    api.get("/leaderboard/players", { params: { tri } })
+      .then((r) => setPlayersByTri((prev) => ({ ...prev, [tri]: r.data })))
+      .catch(() => setPlayersByTri((prev) => ({ ...prev, [tri]: null })))
+      .finally(() => setPloading(false));
+  }, [playersByTri]);
+
+  useEffect(() => {
+    const cfg = PLAYER_TABS[tab];
+    if (cfg) loadPlayers(cfg.tri);
+  }, [tab, loadPlayers]);
+
+  const renderPlayers = (key) => {
+    const cfg = PLAYER_TABS[key];
+    const data = playersByTri[cfg.tri];
+    if (ploading && !data) {
+      return <div className="space-y-2">{[...Array(8)].map((_, i) => <Skeleton key={i} className="h-16 rounded-xl bg-slate-800/50" />)}</div>;
+    }
+    if (!data?.disponible) {
+      return (
+        <div className="card-surface rounded-xl p-8 text-center" data-testid="players-leaderboard-unavailable">
+          <DataUnavailable label="Classement indisponible" />
+          <p className="text-sm text-slate-400 mt-3 max-w-md mx-auto">{data?.message || "Données non disponibles."}</p>
+        </div>
+      );
+    }
+    return (
+      <>
+        <p className="text-xs text-slate-500 mb-3">
+          Classés par {cfg.note} · min. {data.min_minutes} min jouées · 5 grands championnats · source Understat.
+        </p>
+        <div className="space-y-2" data-testid={`players-leaderboard-${key}`}>
+          {data.joueurs.map((p, i) => (
+            <PlayerRow key={p.player_id} player={p} rank={i + 1} metric={cfg.metric} testid={`lb-player-${p.player_id}`} />
+          ))}
+        </div>
+      </>
+    );
+  };
+
+  const triggerCls = "data-[state=active]:bg-emerald-500 data-[state=active]:text-white text-xs sm:text-sm";
 
   return (
     <div className="max-w-4xl mx-auto px-3 sm:px-6 py-6">
       <h1 className="font-head text-3xl sm:text-4xl font-extrabold text-slate-50 mb-1">Classements</h1>
-      <p className="text-slate-400 text-sm mb-6">Équipes classées par score global de forme sur 100.</p>
+      <p className="text-slate-400 text-sm mb-6">Équipes et joueurs des grands championnats européens.</p>
 
-      <Tabs defaultValue="equipes">
-        <TabsList className="bg-slate-900/60 border border-slate-800">
-          <TabsTrigger value="equipes" data-testid="tab-teams" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
-            <Trophy className="w-4 h-4 mr-1.5" /> Meilleures équipes
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="bg-slate-900/60 border border-slate-800 flex-wrap h-auto">
+          <TabsTrigger value="equipes" data-testid="tab-teams" className={triggerCls}>
+            <Trophy className="w-4 h-4 mr-1.5" /> Équipes
           </TabsTrigger>
-          <TabsTrigger value="joueurs" data-testid="tab-players" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
-            <Users className="w-4 h-4 mr-1.5" /> Meilleurs joueurs
+          <TabsTrigger value="joueurs" data-testid="tab-players" className={triggerCls}>
+            <Users className="w-4 h-4 mr-1.5" /> Joueurs
+          </TabsTrigger>
+          <TabsTrigger value="buteurs" data-testid="tab-buteurs" className={triggerCls}>
+            <Goal className="w-4 h-4 mr-1.5" /> Buteurs
+          </TabsTrigger>
+          <TabsTrigger value="passeurs" data-testid="tab-passeurs" className={triggerCls}>
+            <Handshake className="w-4 h-4 mr-1.5" /> Passeurs
           </TabsTrigger>
         </TabsList>
 
@@ -81,27 +132,9 @@ export default function Leaderboards() {
           )}
         </TabsContent>
 
-        <TabsContent value="joueurs" className="mt-4">
-          {ploading ? (
-            <div className="space-y-2">{[...Array(8)].map((_, i) => <Skeleton key={i} className="h-16 rounded-xl bg-slate-800/50" />)}</div>
-          ) : players?.disponible ? (
-            <>
-              <p className="text-xs text-slate-500 mb-3">
-                Classés par score joueur /100 · min. {players.min_minutes} minutes jouées · source Understat (saison en cours).
-              </p>
-              <div className="space-y-2" data-testid="players-leaderboard">
-                {players.joueurs.map((p, i) => (
-                  <PlayerRow key={p.player_id} player={p} rank={i + 1} testid={`lb-player-${p.player_id}`} />
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="card-surface rounded-xl p-8 text-center" data-testid="players-leaderboard-unavailable">
-              <DataUnavailable label="Classement joueurs indisponible" />
-              <p className="text-sm text-slate-400 mt-3 max-w-md mx-auto">{players?.message || "Données non disponibles."}</p>
-            </div>
-          )}
-        </TabsContent>
+        <TabsContent value="joueurs" className="mt-4">{renderPlayers("joueurs")}</TabsContent>
+        <TabsContent value="buteurs" className="mt-4">{renderPlayers("buteurs")}</TabsContent>
+        <TabsContent value="passeurs" className="mt-4">{renderPlayers("passeurs")}</TabsContent>
       </Tabs>
     </div>
   );

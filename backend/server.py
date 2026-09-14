@@ -320,22 +320,28 @@ async def leaderboard_teams(code: str | None = None):
 
 
 @api_router.get("/leaderboard/players")
-async def leaderboard_players(code: str | None = None, min_minutes: int = 180):
+async def leaderboard_players(code: str | None = None, tri: str = "global",
+                              min_minutes: int | None = None):
     codes = [code] if code else list(UNDERSTAT_LEAGUES.keys())
     codes = [c for c in codes if c in UNDERSTAT_LEAGUES]
     if not codes:
         return {"disponible": False,
                 "message": "Statistiques joueurs indisponibles pour ce championnat."}
+    mm = min_minutes if min_minutes is not None else (180 if tri == "global" else 30)
     docs = await db.players.find({"competition_code": {"$in": codes},
-                                  "minutes": {"$gte": min_minutes}}, {"_id": 0}).to_list(3000)
+                                  "minutes": {"$gte": mm}}, {"_id": 0}).to_list(3000)
     if not docs:
-        return {"disponible": False,
-                "message": "Données joueurs pas encore synchronisées."}
+        return {"disponible": False, "message": "Données joueurs pas encore synchronisées."}
     players = [analyze_player(d) for d in docs]
     for p, d in zip(players, docs):
         p["competition_nom"] = COMPETITION_META.get(d["competition_code"], {}).get("nom")
-    players.sort(key=lambda p: p["scores"]["global"]["score"], reverse=True)
-    return {"disponible": True, "min_minutes": min_minutes, "joueurs": players[:100]}
+    if tri == "buteurs":
+        players.sort(key=lambda p: (p["stats"]["buts"], p["stats"]["xG"]), reverse=True)
+    elif tri == "passeurs":
+        players.sort(key=lambda p: (p["stats"]["passes_decisives"], p["stats"]["xA"]), reverse=True)
+    else:
+        players.sort(key=lambda p: p["scores"]["global"]["score"], reverse=True)
+    return {"disponible": True, "tri": tri, "min_minutes": mm, "joueurs": players[:100]}
 
 
 @api_router.get("/player/{player_id}")

@@ -25,7 +25,15 @@ COMPETITION_META = {
     "PPL": {"nom": "Primeira Liga", "pays": "Portugal"},
     "DED": {"nom": "Eredivisie", "pays": "Pays-Bas"},
     "ELC": {"nom": "Championship", "pays": "Angleterre"},
+    "BSA": {"nom": "Série A (Brésil)", "pays": "Brésil"},
+    "CL":  {"nom": "Ligue des Champions", "pays": "Europe", "cup": True},
+    "EC":  {"nom": "Championnat d'Europe", "pays": "Europe", "cup": True},
+    "WC":  {"nom": "Coupe du Monde", "pays": "Monde", "cup": True},
 }
+
+
+def is_cup(code):
+    return bool(COMPETITION_META.get(code, {}).get("cup"))
 
 
 def configured_codes():
@@ -120,6 +128,9 @@ async def run_ingest(db):
                 stats["matchs"] += 1
 
             try:
+                if is_cup(code):
+                    stats["championnats"] += 1
+                    continue  # pas de classement pour les coupes
                 sd = await client.standings(code)
                 total = next((s for s in sd.get("standings", []) if s.get("type") == "TOTAL"), None)
                 await db.standings.update_one(
