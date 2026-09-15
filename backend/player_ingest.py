@@ -206,8 +206,9 @@ async def ingest_fotmob_players(db):
                 "last_synced_at": now,
             })
 
-        await db.players.delete_many({"competition_code": code})
+        # Ne pas écraser les données existantes si la récupération FotMob est vide
         if docs:
+            await db.players.delete_many({"competition_code": code})
             await db.players.insert_many(docs)
         total += len(docs)
         logger.info("Joueurs FotMob %s (saison %s): %s (équipes rapprochées %s/%s)",

@@ -472,7 +472,7 @@ async def search(q: str = Query(..., min_length=2)):
                         "score": a["scores"]["global"]["score"]})
     return {"equipes": teams[:30],
             "joueurs": {"disponible": bool(joueurs), "resultats": joueurs,
-                        "message": None if joueurs else "Aucun joueur trouvé (couverture : 5 grands championnats)."}}
+                        "message": None if joueurs else "Aucun joueur trouvé (couverture : 5 grands championnats + Portugal et Pays-Bas)."}}
 
 
 @api_router.get("/scoring/config")

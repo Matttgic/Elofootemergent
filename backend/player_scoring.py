@@ -6,7 +6,6 @@ le Portugal et les Pays-Bas). Normalisation par 90 minutes.
 90-100, un bon joueur se situe ~65-75, un joueur moyen ~45-55. La logique reste
 déterministe et ne fabrique aucune donnée : les valeurs absentes sont ignorées.
 """
-import math
 from scoring import clamp
 
 # Références "élite" (par 90 min) : niveau atteint par le meilleur profil d'un
@@ -101,9 +100,19 @@ def analyze_player(doc):
     creation = _adj(creation_raw)
     offensif = _adj(offensif_raw)
     implication = _adj(implication_raw)
-    b_c = _split(buteur, [b1, b2])
-    c_c = _split(creation, [c1, c2, c3])
-    o_c = _split(offensif, [o1, o2, o3])
+
+    def _components(raw, adj, ratios, rows):
+        """Contributions basées sur le sous-score brut + une ligne d'ajustement
+        fiabilité, de sorte que la somme des lignes = score affiché."""
+        parts = _split(raw, ratios)
+        comps = [{"libelle": l, "poids": p, "detail": d, "contribution": parts[i]}
+                 for i, (l, p, d) in enumerate(rows)]
+        fiab = round(adj) - sum(parts)
+        if fiab != 0:
+            comps.append({"libelle": "Ajustement fiabilité", "poids": "—",
+                          "detail": f"fiabilité {round(rel*100)}% ({int(minutes)} min)",
+                          "contribution": fiab})
+        return comps
 
     c_but = PLAYER_WEIGHTS["buteur"] * buteur
     c_cre = PLAYER_WEIGHTS["creation"] * creation
@@ -129,20 +138,20 @@ def analyze_player(doc):
                 {"libelle": "Implication offensive", "poids": "10%", "detail": f"{round(implication)}/100", "contribution": round(c_imp)},
                 {"libelle": "Fiabilité (temps de jeu)", "poids": "—", "detail": f"{int(minutes)} min jouées — fiabilité {round(rel*100)}%", "contribution": 0},
             ]},
-            "buteur": score(buteur, [
-                {"libelle": "Buts / 90 min", "poids": "60%", "detail": f"{g90:.2f}", "contribution": b_c[0]},
-                {"libelle": "xG / 90 min", "poids": "40%", "detail": f"{xg90:.2f}", "contribution": b_c[1]},
-            ]),
-            "creation": score(creation, [
-                {"libelle": "Passes décisives / 90", "poids": "45%", "detail": f"{a90:.2f}", "contribution": c_c[0]},
-                {"libelle": "Occasions créées / 90", "poids": "30%", "detail": f"{kp90:.2f}", "contribution": c_c[1]},
-                {"libelle": "xA / 90", "poids": "25%", "detail": f"{xa90:.2f}", "contribution": c_c[2]},
-            ]),
-            "offensif": score(offensif, [
-                {"libelle": "xG + xA / 90", "poids": "50%", "detail": f"{(xg90+xa90):.2f}", "contribution": o_c[0]},
-                {"libelle": "Tirs / 90", "poids": "30%", "detail": f"{sh90:.2f}", "contribution": o_c[1]},
-                {"libelle": "Buts + passes / 90", "poids": "20%", "detail": f"{(g90+a90):.2f}", "contribution": o_c[2]},
-            ]),
+            "buteur": score(buteur, _components(buteur_raw, buteur, [b1, b2], [
+                ("Buts / 90 min", "60%", f"{g90:.2f}"),
+                ("xG / 90 min", "40%", f"{xg90:.2f}"),
+            ])),
+            "creation": score(creation, _components(creation_raw, creation, [c1, c2, c3], [
+                ("Passes décisives / 90", "45%", f"{a90:.2f}"),
+                ("Occasions créées / 90", "30%", f"{kp90:.2f}"),
+                ("xA / 90", "25%", f"{xa90:.2f}"),
+            ])),
+            "offensif": score(offensif, _components(offensif_raw, offensif, [o1, o2, o3], [
+                ("xG + xA / 90", "50%", f"{(xg90+xa90):.2f}"),
+                ("Tirs / 90", "30%", f"{sh90:.2f}"),
+                ("Buts + passes / 90", "20%", f"{(g90+a90):.2f}"),
+            ])),
             "forme": {"score": round(implication), "composantes": [
                 {"libelle": "Implication offensive (xGChain / 90)", "poids": "100%",
                  "detail": f"{chain90:.2f} — sur la saison en cours ({doc.get('games', 0)} matchs)",
