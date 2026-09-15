@@ -157,6 +157,51 @@ export default function MatchDetail() {
         </div>
       </div>
 
+      {/* Prédiction & confiance */}
+      {d.signaux?.probabilites && (
+        <div className="card-surface rounded-xl p-5 mb-6" data-testid="prediction-panel">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h3 className="font-head font-bold text-slate-100">Probabilités du match</h3>
+            {d.fiabilite && (
+              <span className="text-xs px-2 py-1 rounded font-stat font-bold" data-testid="confidence-badge"
+                style={{ color: d.fiabilite.niveau === "Élevée" ? "#10B981" : d.fiabilite.niveau === "Moyenne" ? "#F59E0B" : "#EF4444",
+                         backgroundColor: (d.fiabilite.niveau === "Élevée" ? "#10B981" : d.fiabilite.niveau === "Moyenne" ? "#F59E0B" : "#EF4444") + "1A" }}>
+                Confiance : {d.fiabilite.niveau}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center mb-3">
+            {[["Victoire " + (m.home_team?.tla || "dom."), d.signaux.probabilites.domicile_pct, "#10B981"],
+              ["Nul", d.signaux.probabilites.nul_pct, "#64748B"],
+              ["Victoire " + (m.away_team?.tla || "ext."), d.signaux.probabilites.exterieur_pct, "#06B6D4"]].map(([l, v, c]) => (
+              <div key={l} className="bg-slate-900/50 rounded-lg py-2">
+                <div className="font-stat font-black text-2xl" style={{ color: c }}>{v}%</div>
+                <div className="text-[10px] text-slate-500 uppercase truncate px-1">{l}</div>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap text-xs text-slate-400">
+            <span>Scores probables :</span>
+            {d.signaux.probabilites.scores_probables.map((s, i) => (
+              <span key={i} className="font-stat bg-slate-800 rounded px-2 py-0.5 text-slate-200">{s.score} <span className="text-slate-500">{s.pct}%</span></span>
+            ))}
+          </div>
+          {d.calibration && (
+            <div className="mt-3 pt-3 border-t border-slate-800 text-xs text-slate-400" data-testid="calibration-note">
+              📊 Historiquement, avec un écart de <b className="text-slate-200">{d.calibration.ecart} pts</b> ({d.calibration.tranche}),
+              l'équipe favorite (<b className="text-emerald-400">{d.calibration.favori}</b>) l'emporte
+              <b className="text-slate-200"> {d.calibration.favori_gagne_pct}%</b> du temps
+              (nul {d.calibration.nul_pct}%, surprise {d.calibration.outsider_gagne_pct}%) — sur {d.calibration.echantillon} matchs.
+            </div>
+          )}
+          {(d.repos?.domicile != null || d.repos?.exterieur != null) && (
+            <div className="mt-2 text-xs text-slate-500" data-testid="rest-days">
+              Repos : {m.home_team?.tla || "Dom."} {d.repos.domicile ?? "?"} j · {m.away_team?.tla || "Ext."} {d.repos.exterieur ?? "?"} j
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Score panels */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <TeamPanel team={home} side="home" />

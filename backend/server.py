@@ -11,7 +11,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from scoring import analyze_team, scoring_config, paris_date
-from signals import build_signals, head_to_head
+from signals import build_signals, head_to_head, h2h_insight
 from player_scoring import analyze_player, player_scoring_config
 from player_form import compute_recent_form
 from understat_client import UNDERSTAT_LEAGUES, fetch_player_matches
@@ -287,6 +287,60 @@ async def match_detail(match_id: int):
     lg_home_avg = sum(lg_home) / len(lg_home) if lg_home else 1.45
     lg_away_avg = sum(lg_away) / len(lg_away) if lg_away else 1.15
 
+    signaux = build_signals(all_m, hid, aid,
+                            home["nom_court"] if home else "Domicile",
+                            away["nom_court"] if away else "Extérieur",
+                            lg_home_avg, lg_away_avg)
+    confrontations = head_to_head(all_m, hid, aid)
+    if signaux.get("disponible"):
+        hi = h2h_insight(confrontations)
+        if hi:
+            signaux["signaux"].append(hi)
+
+    # Indice de confiance (nombre de matchs analysés)
+    hm = (home or {}).get("stats", {}).get("matchs_analyses", 0) if home else 0
+    am = (away or {}).get("stats", {}).get("matchs_analyses", 0) if away else 0
+    mn = min(hm, am)
+    niveau = "Élevée" if mn >= 6 else ("Moyenne" if mn >= 4 else "Faible")
+    fiabilite = {
+        "niveau": niveau, "matchs_min": mn,
+        "message": "Analyse fondée sur peu de matchs — à interpréter avec prudence." if mn < 4
+                   else "Échantillon suffisant pour une lecture fiable." if mn >= 6
+                   else "Échantillon modéré.",
+    }
+
+    # Calibration : lien écart de notes ↔ résultats observés historiquement
+    calibration = None
+    if home and away and home.get("global") and away.get("global"):
+        gap = abs(home["global"]["score"] - away["global"]["score"])
+        fav = home["nom_court"] if home["global"]["score"] >= away["global"]["score"] else away["nom_court"]
+        sd = await stats_analytics(None)
+        for lo, hi, label in STAT_BUCKETS:
+            if lo <= gap < hi:
+                b = next((x for x in sd.get("par_ecart_note", []) if x["tranche"] == label), None)
+                if b and b.get("matchs"):
+                    calibration = {"ecart": gap, "tranche": label, "favori": fav,
+                                   "favori_gagne_pct": b["note_sup_gagne_pct"], "nul_pct": b["nul_pct"],
+                                   "outsider_gagne_pct": b["note_inf_gagne_pct"], "echantillon": b["matchs"]}
+                break
+
+    # Jours de repos (dernier match joué avant celui-ci)
+    def _last_played(team_id):
+        ds = [x["utc_date"] for x in all_m if x.get("status") == "FINISHED" and x.get("utc_date")
+              and (m.get("utc_date") is None or x["utc_date"] < m["utc_date"])
+              and team_id in ((x.get("home_team") or {}).get("id"), (x.get("away_team") or {}).get("id"))]
+        return max(ds) if ds else None
+
+    def _rest(team_id):
+        last = _last_played(team_id)
+        if not last or not m.get("utc_date"):
+            return None
+        d = (datetime.fromisoformat(m["utc_date"].replace("Z", "+00:00"))
+             - datetime.fromisoformat(last.replace("Z", "+00:00"))).days
+        return d if d >= 0 else None
+
+    repos = {"domicile": _rest(hid), "exterieur": _rest(aid)}
+
     return {
         "match": {**_match_summary(m),
                   "competition": {"code": code, "nom": COMPETITION_META.get(code, {}).get("nom"),
@@ -295,11 +349,11 @@ async def match_detail(match_id: int):
         "domicile": home,
         "exterieur": away,
         "avantages": avantages,
-        "signaux": build_signals(all_m, hid, aid,
-                                 home["nom_court"] if home else "Domicile",
-                                 away["nom_court"] if away else "Extérieur",
-                                 lg_home_avg, lg_away_avg),
-        "confrontations": head_to_head(all_m, hid, aid),
+        "fiabilite": fiabilite,
+        "calibration": calibration,
+        "repos": repos,
+        "signaux": signaux,
+        "confrontations": confrontations,
         "joueurs": joueurs,
     }
 
@@ -332,7 +386,7 @@ async def leaderboard_teams(code: str | None = None):
 
 @api_router.get("/leaderboard/players")
 async def leaderboard_players(code: str | None = None, tri: str = "global",
-                              min_minutes: int | None = None):
+                              poste: str | None = None, min_minutes: int | None = None):
     codes = [code] if code else list(UNDERSTAT_LEAGUES.keys())
     codes = [c for c in codes if c in UNDERSTAT_LEAGUES]
     if not codes:
@@ -346,6 +400,8 @@ async def leaderboard_players(code: str | None = None, tri: str = "global",
     players = [analyze_player(d) for d in docs]
     for p, d in zip(players, docs):
         p["competition_nom"] = COMPETITION_META.get(d["competition_code"], {}).get("nom")
+    if poste and poste != "Tous":
+        players = [p for p in players if p["poste"] == poste]
     if tri == "buteurs":
         players.sort(key=lambda p: (p["stats"]["buts"], p["stats"]["xG"]), reverse=True)
     elif tri == "passeurs":

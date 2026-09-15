@@ -51,6 +51,9 @@ Belgique/Écosse/Turquie non couvertes par l'offre gratuite (omises, extensibles
 - [x] Radar de comparaison fiabilisé (outerRadius explicite) ; tests 23/23 backend + frontend OK
 
 ## Backlog priorisé
+- P2 : Découper server.py en routers (matches/players/stats)
+- P2 : Rafraîchir le cache /stats en tâche de fond après chaque ingest
+- P2 : Données joueurs Portugal/Pays-Bas si source gratuite ; scores exacts fréquents par écart
 - P1 : Cache des analyses par championnat (perf leaderboard toutes ligues)
 - P2 : Fiche joueur dédiée (page) avec évolution de forme
 - P2 : Données joueurs pour Portugal/Pays-Bas si source gratuite trouvée

@@ -7,7 +7,10 @@ import { FormChips } from "../components/FormChips";
 import { DataUnavailable } from "../components/DataUnavailable";
 import { Skeleton } from "../components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
-import { Trophy, Users, Goal, Handshake } from "lucide-react";
+import { Trophy, Users, Goal, Handshake, Star } from "lucide-react";
+import { useFavorites } from "../lib/useFavorites";
+
+const POSTES = ["Tous", "Attaquant", "Milieu", "Défenseur", "Gardien"];
 
 const PLAYER_TABS = {
   joueurs: { tri: "global", metric: "global", note: "score joueur /100" },
@@ -23,6 +26,8 @@ export default function Leaderboards() {
   const [tab, setTab] = useState("equipes");
   const [playersByTri, setPlayersByTri] = useState({});
   const [ploading, setPloading] = useState(false);
+  const [poste, setPoste] = useState("Tous");
+  const { isFav, toggle } = useFavorites();
 
   useEffect(() => { api.get("/competitions").then((r) => setComps(r.data)).catch(() => {}); }, []);
 
@@ -34,13 +39,14 @@ export default function Leaderboards() {
   }, [code]);
 
   const loadPlayers = useCallback((tri) => {
-    if (playersByTri[tri]) return;
+    const key = `${tri}|${poste}`;
+    if (playersByTri[key]) return;
     setPloading(true);
-    api.get("/leaderboard/players", { params: { tri } })
-      .then((r) => setPlayersByTri((prev) => ({ ...prev, [tri]: r.data })))
-      .catch(() => setPlayersByTri((prev) => ({ ...prev, [tri]: null })))
+    api.get("/leaderboard/players", { params: { tri, poste } })
+      .then((r) => setPlayersByTri((prev) => ({ ...prev, [key]: r.data })))
+      .catch(() => setPlayersByTri((prev) => ({ ...prev, [key]: null })))
       .finally(() => setPloading(false));
-  }, [playersByTri]);
+  }, [playersByTri, poste]);
 
   useEffect(() => {
     const cfg = PLAYER_TABS[tab];
@@ -49,20 +55,32 @@ export default function Leaderboards() {
 
   const renderPlayers = (key) => {
     const cfg = PLAYER_TABS[key];
-    const data = playersByTri[cfg.tri];
+    const data = playersByTri[`${cfg.tri}|${poste}`];
+    const posteFilter = (
+      <div className="flex items-center gap-2 overflow-x-auto pb-2 mb-3" data-testid="poste-filter">
+        {POSTES.map((pz) => (
+          <button key={pz} onClick={() => setPoste(pz)} data-testid={`poste-${pz.toLowerCase()}`}
+            className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
+              poste === pz ? "bg-emerald-500 text-white" : "bg-slate-800/60 text-slate-300"}`}>{pz}</button>
+        ))}
+      </div>
+    );
     if (ploading && !data) {
-      return <div className="space-y-2">{[...Array(8)].map((_, i) => <Skeleton key={i} className="h-16 rounded-xl bg-slate-800/50" />)}</div>;
+      return <>{posteFilter}<div className="space-y-2">{[...Array(8)].map((_, i) => <Skeleton key={i} className="h-16 rounded-xl bg-slate-800/50" />)}</div></>;
     }
     if (!data?.disponible) {
       return (
-        <div className="card-surface rounded-xl p-8 text-center" data-testid="players-leaderboard-unavailable">
-          <DataUnavailable label="Classement indisponible" />
-          <p className="text-sm text-slate-400 mt-3 max-w-md mx-auto">{data?.message || "Données non disponibles."}</p>
-        </div>
+        <>{posteFilter}
+          <div className="card-surface rounded-xl p-8 text-center" data-testid="players-leaderboard-unavailable">
+            <DataUnavailable label="Classement indisponible" />
+            <p className="text-sm text-slate-400 mt-3 max-w-md mx-auto">{data?.message || "Aucun joueur pour ce filtre."}</p>
+          </div>
+        </>
       );
     }
     return (
       <>
+        {posteFilter}
         <p className="text-xs text-slate-500 mb-3">
           Classés par {cfg.note} · min. {data.min_minutes} min jouées · 5 grands championnats · source Understat.
         </p>
@@ -113,19 +131,26 @@ export default function Leaderboards() {
           ) : (
             <div className="space-y-2" data-testid="teams-leaderboard">
               {(teams || []).map((t, i) => (
-                <Link key={`${t.competition_code}-${t.team_id}`} to={`/equipe/${t.competition_code}/${t.team_id}`}
-                  data-testid={`lb-team-${t.team_id}`} className="card-surface rounded-xl p-3 flex items-center gap-3">
-                  <div className="w-7 text-center font-stat font-black text-slate-500">{i + 1}</div>
-                  {t.logo ? <img src={t.logo} alt="" className="w-9 h-9 object-contain" /> : <div className="w-9 h-9 rounded bg-slate-800" />}
-                  <div className="min-w-0 flex-1">
-                    <div className="font-semibold text-slate-100 text-sm truncate">{t.nom_court || t.nom}</div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[11px] text-slate-500">{t.competition_nom}</span>
-                      <FormChips form={t.forme_recente} />
+                <div key={`${t.competition_code}-${t.team_id}`} className="relative">
+                  <Link to={`/equipe/${t.competition_code}/${t.team_id}`}
+                    data-testid={`lb-team-${t.team_id}`} className="card-surface rounded-xl p-3 pr-11 flex items-center gap-3">
+                    <div className="w-7 text-center font-stat font-black text-slate-500">{i + 1}</div>
+                    {t.logo ? <img src={t.logo} alt="" className="w-9 h-9 object-contain" /> : <div className="w-9 h-9 rounded bg-slate-800" />}
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-slate-100 text-sm truncate">{t.nom_court || t.nom}</div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[11px] text-slate-500">{t.competition_nom}</span>
+                        <FormChips form={t.forme_recente} />
+                      </div>
                     </div>
-                  </div>
-                  <ScoreBadge score={t.global} size="sm" />
-                </Link>
+                    <ScoreBadge score={t.global} size="sm" />
+                  </Link>
+                  <button data-testid={`fav-toggle-${t.team_id}`}
+                    onClick={(e) => { e.preventDefault(); toggle({ team_id: t.team_id, nom: t.nom_court || t.nom, logo: t.logo, competition_code: t.competition_code }); }}
+                    className="absolute top-1/2 -translate-y-1/2 right-2 p-1.5 rounded-md hover:bg-slate-800 z-10">
+                    <Star className={`w-4 h-4 ${isFav(t.team_id) ? "text-amber-400 fill-amber-400" : "text-slate-600"}`} />
+                  </button>
+                </div>
               ))}
               {(teams || []).length === 0 && <div className="text-center text-slate-500 py-10">Aucune donnée disponible.</div>}
             </div>

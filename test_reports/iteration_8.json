@@ -1,0 +1,23 @@
+{
+  "summary": "Itération 8: indice de confiance, calibration, Poisson 1N2 + scores probables, signaux prob-based, H2H pondéré, jours de repos, fiche joueur /joueur/:id, filtre poste sur leaderboard, favoris localStorage, filtre statut Home. Backend: 14/14 tests iter8 (test_iter8.py). Match 560542 (Arsenal vs Coventry, écart 63): fiabilite.niveau=Moyenne, calibration ecart=63 tranche='30+' favori='Arsenal' favori_gagne_pct=91.2 sur 91 matchs, repos=None (début saison ok), probabilites {94/5/1} somme 100, scores_probables [3-0 18.8%, 2-0 16.7%, 4-0 16.0%] décroissants, Over 2.5=68% Favorable, Historique direct absent (0 confrontations). Leaderboard poste=Attaquant/Milieu/Défenseur/Gardien filtre strictement (100% pur poste), tri buteurs décroissant vérifié. Player detail: scores {global,buteur,creation,offensif,forme}, forme_recente.matchs=6 pour Mbappe (7B 1PD). Régression: /api/matches, /api/stats (7 tranches 0–5..30+), /api/leaderboard/teams, /api/competitions=12, /api/scoring/config -> OK. Frontend (Playwright, Chrome 1440x1000): status-filter-{tous,a_venir,termines} toggles OK sur /; /match/560542 -> prediction-panel + confidence-badge + calibration-note + 3 colonnes 1N2 (94/5/1) + scores probables affichés; favoris: fav-toggle-5 ajoute Arsenal, favorites-strip apparaît sur / avec fav-team-5, persistant après reload (localStorage footpulse_fav_teams); poste-filter sur onglet Buteurs avec 5 boutons (attaquant/milieu/défenseur/gardien/tous), filtrage OK; clic sur lb-player-3423 -> /joueur/3423, player-header + player-recent-form (Mbappé 7B, liste 6 matchs) visibles.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter8.py",
+    "/app/test_reports/pytest/iter8_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py continue de grossir (~622 lignes) — envisager routers séparés (matches, players, stats).",
+    "match_detail appelle stats_analytics(None) pour chaque match: OK grâce au cache 10 min, mais si le cache expire au premier match du jour un utilisateur paiera ~1 s de calcul. Envisager de rafraîchir le cache stats en tâche de fond après ingest.",
+    "STAT_BUCKETS a 7 tranches côté /api/stats mais les libellés utilisés pour calibration côté match_detail bouclent sur les 7 mêmes tranches — cohérent, mais un dernier bucket (25–30, 30+) est très rare et l'affichage 'surprise 0.0%' peut sembler trop catégorique pour un utilisateur; ajouter un rappel de la taille d'échantillon (déjà fait) est bien.",
+    "PlayerPage.jsx: forme.matchs.map(mt, i) utilise l'index comme clé — préférer mt.date + mt.adversaire (mineur)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter8.py"],
+  "success_rate": {"backend": "100% (14/14 iter8)", "frontend": "100%"},
+  "seed_data_creation": "Aucune",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "test_iter8.py couvre toutes les features iter8 (probabilités, calibration, repos, fiabilité, poste, /player). Régression rapide: test_iter8.py suffit. Match test gros favori: 560542 (Arsenal vs Coventry écart 63, tranche 30+, favori_gagne_pct 91.2%). Player test: pid=3423 (Mbappé, buteurs top1). Favoris localStorage clé=footpulse_fav_teams.",
+  "rca of the issue": "N/A - aucun bug"
+}

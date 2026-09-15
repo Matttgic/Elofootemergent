@@ -6,6 +6,9 @@ import { Skeleton } from "../components/ui/skeleton";
 import { ChevronLeft, ChevronRight, CalendarDays, AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { motion } from "framer-motion";
+import { useFavorites } from "../lib/useFavorites";
+import { Link } from "react-router-dom";
+import { Star } from "lucide-react";
 
 function SyncBanner({ status }) {
   if (!status || status.token_present) return null;
@@ -29,6 +32,8 @@ export default function Home() {
   const [date, setDate] = useState(todayISO());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [statut, setStatut] = useState("tous");
+  const { favs } = useFavorites();
 
   const loadStatus = useCallback(() => {
     api.get("/status").then((r) => setStatus(r.data)).catch(() => {});
@@ -57,7 +62,12 @@ export default function Home() {
     setDate(d.toLocaleDateString("en-CA"));
   };
 
-  const matchs = data?.matchs || [];
+  const allMatchs = data?.matchs || [];
+  const matchs = allMatchs.filter((m) => {
+    if (statut === "a_venir") return !["FINISHED", "IN_PLAY", "PAUSED"].includes(m.status);
+    if (statut === "termines") return m.status === "FINISHED";
+    return true;
+  });
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-6">
@@ -86,6 +96,23 @@ export default function Home() {
       </motion.div>
 
       <SyncBanner status={status} />
+
+      {favs.length > 0 && (
+        <div className="mb-4" data-testid="favorites-strip">
+          <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-2 font-semibold">
+            <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" /> Mes équipes
+          </div>
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {favs.map((f) => (
+              <Link key={f.team_id} to={`/equipe/${f.competition_code}/${f.team_id}`} data-testid={`fav-team-${f.team_id}`}
+                className="card-surface rounded-lg px-3 py-1.5 flex items-center gap-2 shrink-0">
+                {f.logo && <img src={f.logo} alt="" className="w-5 h-5 object-contain" />}
+                <span className="text-sm text-slate-200 whitespace-nowrap">{f.nom}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Date navigation */}
       <div className="flex items-center gap-2 mb-4">
@@ -116,6 +143,17 @@ export default function Home() {
             className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
               code === c.code ? "bg-emerald-500 text-white" : "bg-slate-800/60 text-slate-300 hover:bg-slate-800"}`}>
             {c.nom}
+          </button>
+        ))}
+      </div>
+
+      {/* Status filter */}
+      <div className="flex items-center gap-2 mb-6">
+        {[["tous", "Tous"], ["a_venir", "À venir"], ["termines", "Terminés"]].map(([v, l]) => (
+          <button key={v} onClick={() => setStatut(v)} data-testid={`status-filter-${v}`}
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+              statut === v ? "bg-cyan-500 text-white" : "bg-slate-800/60 text-slate-400 hover:bg-slate-800"}`}>
+            {l}
           </button>
         ))}
       </div>
