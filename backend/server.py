@@ -15,8 +15,12 @@ from signals import build_signals, head_to_head, h2h_insight
 from player_scoring import analyze_player, player_scoring_config
 from player_form import compute_recent_form
 from understat_client import UNDERSTAT_LEAGUES, fetch_player_matches
+from fotmob_client import FOTMOB_LEAGUES
 from ingest import run_ingest, run_light_ingest, configured_codes, COMPETITION_META, is_cup
 from football_client import get_token
+
+# Championnats disposant de statistiques individuelles (Understat + FotMob)
+PLAYER_LEAGUES = set(UNDERSTAT_LEAGUES) | set(FOTMOB_LEAGUES)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -129,7 +133,7 @@ def _match_summary(m):
 
 
 async def _top_players(team_id, code, limit=4, min_minutes=90):
-    if team_id is None or code not in UNDERSTAT_LEAGUES:
+    if team_id is None or code not in PLAYER_LEAGUES:
         return None
     docs = await db.players.find({"competition_code": code, "team_id": team_id,
                                   "minutes": {"$gte": min_minutes}}, {"_id": 0}).to_list(200)
@@ -141,6 +145,8 @@ async def _top_players(team_id, code, limit=4, min_minutes=90):
 async def get_player_form(pid):
     """Forme récente d'un joueur, avec cache (18h) dans player_form."""
     from datetime import timedelta
+    if str(pid).startswith("fm"):
+        return None  # journal match par match indisponible pour la source FotMob
     doc = await db.player_form.find_one({"_id": pid})
     if doc:
         try:
@@ -265,13 +271,14 @@ async def match_detail(match_id: int):
             "defensif": adv("defensif"), "forme": adv("forme"),
         }
 
-    covered = code in UNDERSTAT_LEAGUES
+    covered = code in PLAYER_LEAGUES
     if covered:
         dom_players = await _top_players(hid, code)
         ext_players = await _top_players(aid, code)
+        src = "Understat · saison en cours" if code in UNDERSTAT_LEAGUES else "FotMob · saison en cours"
         joueurs = {"disponible": True,
                    "domicile": dom_players or [], "exterieur": ext_players or [],
-                   "source": "Understat · saison en cours"}
+                   "source": src}
     else:
         joueurs = {"disponible": False,
                    "message": f"Statistiques individuelles indisponibles pour {COMPETITION_META.get(code, {}).get('nom', code)} "
@@ -387,8 +394,8 @@ async def leaderboard_teams(code: str | None = None):
 @api_router.get("/leaderboard/players")
 async def leaderboard_players(code: str | None = None, tri: str = "global",
                               poste: str | None = None, min_minutes: int | None = None):
-    codes = [code] if code else list(UNDERSTAT_LEAGUES.keys())
-    codes = [c for c in codes if c in UNDERSTAT_LEAGUES]
+    codes = [code] if code else list(PLAYER_LEAGUES)
+    codes = [c for c in codes if c in PLAYER_LEAGUES]
     if not codes:
         return {"disponible": False,
                 "message": "Statistiques joueurs indisponibles pour ce championnat."}
@@ -492,6 +499,7 @@ async def stats_analytics(code: str | None = None):
     higher = {"V": 0, "N": 0, "D": 0}          # résultat de l'équipe la mieux notée
     home_out = {"V": 0, "N": 0, "D": 0}        # résultat du point de vue domicile
     buckets = {b[2]: {"note_sup": 0, "nul": 0, "note_inf": 0} for b in STAT_BUCKETS}
+    scores_par_ecart = {b[2]: {} for b in STAT_BUCKETS}
     total = 0
 
     for c in codes:
@@ -528,6 +536,9 @@ async def stats_analytics(code: str | None = None):
                 if lo <= diff < hi:
                     key = "note_sup" if res == "V" else ("nul" if res == "N" else "note_inf")
                     buckets[label][key] += 1
+                    sg, ig = (gh, ga) if sup_is_home else (ga, gh)
+                    sk = f"{sg}-{ig}"   # score du point de vue de l'équipe la mieux notée
+                    scores_par_ecart[label][sk] = scores_par_ecart[label].get(sk, 0) + 1
                     break
 
     def pct(part, whole):
@@ -538,11 +549,16 @@ async def stats_analytics(code: str | None = None):
     for _, _, label in STAT_BUCKETS:
         b = buckets[label]
         n = b["note_sup"] + b["nul"] + b["note_inf"]
+        sc = scores_par_ecart[label]
+        tot_sc = sum(sc.values())
+        freq = sorted(sc.items(), key=lambda x: (x[1], x[0]), reverse=True)[:4]
+        scores_frequents = [{"score": k, "pct": pct(v, tot_sc), "n": v} for k, v in freq]
         par_ecart.append({
             "tranche": label, "matchs": n,
             "note_sup_gagne_pct": pct(b["note_sup"], n),
             "nul_pct": pct(b["nul"], n),
             "note_inf_gagne_pct": pct(b["note_inf"], n),
+            "scores_frequents": scores_frequents,
         })
 
     result = {

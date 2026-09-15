@@ -1,0 +1,32 @@
+{
+  "summary": "Backend testing for FootPulse iteration 9: scores_frequents in /api/stats, FotMob-backed player data for DED and PPL, Understat regression for PL, recalibrated player scoring bounds, and FotMob /api/player/{id} endpoint. All 11 tests passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_footpulse_features.py",
+    "/app/test_reports/pytest/pytest_iter9.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 638 lines — still manageable but approaching the split threshold; consider extracting player/leaderboard routes if it keeps growing.",
+    "/api/matches is date-scoped only (today or provided date). It's not obvious from the endpoint name — a `status` filter (FINISHED/UPCOMING) would make testing and UI history views easier.",
+    "Match summary object uses a mix of French/English keys (match_date, home_team, domicile). Consistency would help API consumers."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_footpulse_features.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "n/a"},
+  "test_credentials": "None required",
+  "seed_data_creation": "None; used existing DB (FotMob DED/PPL players already ingested this session)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests live at /app/backend/tests/test_footpulse_features.py and cover: (1) /api/stats scores_frequents shape (score 'X-Y', 0<=pct<=100, n>=1, <=4 items per bucket); (2) /api/leaderboard/players for DED, PPL, PL (disponible + non-empty); (3) 'all leagues' leaderboard contains DED and PPL competition_codes; (4) score bounds 0..100 across DED/PPL/PL; (5) /api/match/{id} for a FINISHED DED match returns joueurs.disponible=true with source 'FotMob…' and non-empty domicile/exterieur; (6) PL match still has source 'Understat…'; (7) /api/player/{fm...} returns 200 with scores and forme_recente=null. Since /api/matches is date-only, tests query mongo directly (motor + backend/.env) for a FINISHED match_id per code. All 11 tests pass in ~2s.",
+  "rca of the issue": "N/A — no bugs found."
+}

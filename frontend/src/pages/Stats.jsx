@@ -78,8 +78,27 @@ export default function Stats() {
                 <span className="text-xs text-slate-500 font-stat">{b.matchs} matchs</span>
               </div>
               {b.matchs > 0 ? (
-                <TriBar a={b.note_sup_gagne_pct} b={b.nul_pct} c={b.note_inf_gagne_pct}
-                  labels={["Note sup.", "Nul", "Note inf."]} />
+                <>
+                  <TriBar a={b.note_sup_gagne_pct} b={b.nul_pct} c={b.note_inf_gagne_pct}
+                    labels={["Note sup.", "Nul", "Note inf."]} />
+                  {b.scores_frequents?.length > 0 && (
+                    <div className="mt-2.5" data-testid={`stat-scores-${b.tranche}`}>
+                      <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">
+                        Scores exacts fréquents <span className="text-slate-600">(vue équipe mieux notée)</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {b.scores_frequents.map((s) => (
+                          <span key={s.score}
+                            className="inline-flex items-center gap-1.5 rounded-md bg-slate-800/70 border border-slate-700 px-2 py-1"
+                            data-testid={`stat-score-${b.tranche}-${s.score}`}>
+                            <span className="font-stat font-bold text-slate-100 text-sm tabular-nums">{s.score}</span>
+                            <span className="text-[11px] text-emerald-400 font-stat">{s.pct}%</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
                 <p className="text-xs text-slate-600">Pas assez de données</p>
               )}

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
 from understat_client import fetch_players, UNDERSTAT_LEAGUES
+from fotmob_client import fetch_league_players, FOTMOB_LEAGUES, fotmob_poste
 
 logger = logging.getLogger(__name__)
 
@@ -143,3 +144,76 @@ async def ingest_players(db):
                              {"$set": {"_id": "sync_players", "last_sync": now, "joueurs": total, "saison": season}},
                              upsert=True)
     return {"ok": True, "joueurs": total, "saison": season}
+
+
+
+async def ingest_fotmob_players(db):
+    """Ingestion des joueurs FotMob pour les ligues non couvertes par Understat
+    (Portugal, Pays-Bas). Schéma identique aux docs Understat pour réutiliser la
+    même notation. Aucune donnée n'est inventée."""
+    now = datetime.now(timezone.utc).isoformat()
+    total = 0
+    for code, lid in FOTMOB_LEAGUES.items():
+        st = await db.standings.find_one({"competition_code": code}, {"_id": 0, "season": 1})
+        target_name = None
+        start = ((st or {}).get("season") or {}).get("startDate")
+        if start:
+            y = int(start[:4])
+            target_name = f"{y}/{y + 1}"
+        try:
+            sid, sname, players = await fetch_league_players(lid, target_name)
+        except Exception as e:  # noqa: BLE001
+            logger.error("FotMob échec %s: %s", code, e)
+            continue
+
+        fd_docs = await db.matches.find(
+            {"competition_code": code}, {"_id": 0, "home_team": 1, "away_team": 1}).to_list(2000)
+        fd_teams = {}
+        for d in fd_docs:
+            for side in ("home_team", "away_team"):
+                t = d.get(side) or {}
+                if t.get("id") is not None:
+                    fd_teams[t["id"]] = t
+        titles = {p.get("team_title") for p in players if p.get("team_title")}
+        tmap = build_team_map(titles, list(fd_teams.values()))
+
+        docs = []
+        for p in players:
+            if not p.get("minutes"):
+                continue
+            xg = _f(p.get("xG"))
+            xa = _f(p.get("xA"))
+            docs.append({
+                "player_id": f"fm{p['id']}",
+                "competition_code": code,
+                "season": sid,
+                "source": "fotmob",
+                "nom": p.get("nom"),
+                "position": fotmob_poste(p.get("positions")),
+                "team_title": p.get("team_title"),
+                "team_id": tmap.get(p.get("team_title")),
+                "games": _i(p.get("games")),
+                "minutes": _i(p.get("minutes")),
+                "goals": _i(p.get("goals")),
+                "assists": _i(p.get("assists")),
+                "shots": _i(p.get("shots")),
+                "key_passes": _i(p.get("key_passes")),
+                "xG": xg,
+                "xA": xa,
+                "xGChain": round(xg + xa, 2),   # proxy (FotMob ne fournit pas le xGChain)
+                "yellow": _i(p.get("yellow")),
+                "red": _i(p.get("red")),
+                "last_synced_at": now,
+            })
+
+        await db.players.delete_many({"competition_code": code})
+        if docs:
+            await db.players.insert_many(docs)
+        total += len(docs)
+        logger.info("Joueurs FotMob %s (saison %s): %s (équipes rapprochées %s/%s)",
+                    code, sname, len(docs), len(tmap), len(titles))
+
+    await db.meta.update_one({"_id": "sync_players_fotmob"},
+                             {"$set": {"_id": "sync_players_fotmob", "last_sync": now, "joueurs": total}},
+                             upsert=True)
+    return {"ok": True, "joueurs": total}

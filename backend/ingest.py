@@ -9,7 +9,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from football_client import FootballDataClient, get_token
-from player_ingest import ingest_players
+from player_ingest import ingest_players, ingest_fotmob_players
 from scoring import paris_date
 
 logger = logging.getLogger(__name__)
@@ -163,4 +163,12 @@ async def run_ingest(db):
         logger.error("Ingestion joueurs échouée: %s", e)
         pstats = {"ok": False}
 
-    return {"ok": True, "synced_at": now.isoformat(), **stats, "joueurs": pstats}
+    try:
+        fmstats = await ingest_fotmob_players(db)
+        logger.info("Ingestion joueurs FotMob terminée: %s", fmstats)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Ingestion joueurs FotMob échouée: %s", e)
+        fmstats = {"ok": False}
+
+    return {"ok": True, "synced_at": now.isoformat(), **stats,
+            "joueurs": pstats, "joueurs_fotmob": fmstats}

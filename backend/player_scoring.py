@@ -1,27 +1,51 @@
 """Notation des joueurs (/100) — déterministe, fondée sur les données réelles
-Understat de la saison en cours. Normalisation par 90 minutes.
+de la saison en cours (Understat pour les 5 grands championnats ; FotMob pour
+le Portugal et les Pays-Bas). Normalisation par 90 minutes.
 
-Coefficients documentés (exposés via /api/scoring/config -> section joueurs).
-Aucune donnée n'est inventée ; les valeurs absentes ne sont jamais fabriquées.
+Échelle recalibrée (exigeante) : seuls les profils réellement élites approchent
+90-100, un bon joueur se situe ~65-75, un joueur moyen ~45-55. La logique reste
+déterministe et ne fabrique aucune donnée : les valeurs absentes sont ignorées.
 """
+import math
 from scoring import clamp
 
-# Références "élite" (valeur ~100) pour la normalisation par 90 min
+# Références "élite" (par 90 min) : niveau atteint par le meilleur profil d'un
+# grand championnat. Plus la référence est haute, plus l'échelle est exigeante.
 REF = {
-    "buts_90": 1.0,        # 1 but/90 = niveau élite
-    "xg_90": 1.0,
-    "passes_90": 0.5,
-    "occasions_90": 3.0,
-    "xa_90": 0.5,
-    "tirs_90": 4.0,
-    "chain_90": 1.5,       # xGChain/90 (implication offensive)
+    "buts_90": 0.95,
+    "xg_90": 0.80,
+    "passes_90": 0.45,
+    "occasions_90": 2.60,
+    "xa_90": 0.45,
+    "xga_90": 1.15,        # (xG + xA) / 90
+    "ga_90": 1.15,         # (buts + passes) / 90
+    "tirs_90": 3.80,
+    "chain_90": 1.40,      # xGChain/90 (implication offensive)
 }
 
+# Courbe de calibration : score = 100 * r^EXP (r = production / référence élite).
+# EXP < 1 étale le haut de l'échelle ; r est plafonné pour éviter tout dépassement.
+CURVE_EXP = 0.72
+
 PLAYER_WEIGHTS = {"buteur": 0.38, "creation": 0.30, "offensif": 0.22, "implication": 0.10}
-RELIABILITY_MIN = 450.0     # minutes pour une fiabilité pleine (~5 matchs)
-BASELINE = 40               # score de repli quand l'échantillon est faible
+RELIABILITY_MIN = 900.0     # minutes pour une fiabilité pleine (~10 matchs)
+BASELINE = 38               # score de repli quand l'échantillon est faible
 
 POSTES = {"F": "Attaquant", "M": "Milieu", "D": "Défenseur", "GK": "Gardien", "S": "Remplaçant"}
+
+
+def _curve(r):
+    """Applique la courbe de calibration à un ratio production/référence."""
+    r = clamp(r, 0.0, 1.05)
+    return clamp((r ** CURVE_EXP) * 100)
+
+
+def _split(score, parts):
+    """Répartit `score` proportionnellement aux ratios `parts` (somme = score)."""
+    tot = sum(parts)
+    if tot <= 0:
+        return [0 for _ in parts]
+    return [round(score * p / tot) for p in parts]
 
 
 def _poste(position):
@@ -44,20 +68,48 @@ def analyze_player(doc):
     xa90 = doc["xA"] * per90
     chain90 = doc.get("xGChain", 0) * per90
 
-    buteur = clamp((0.6 * g90 + 0.4 * xg90) / REF["buts_90"] * 100)
-    creation = clamp((0.4 * (a90 / REF["passes_90"]) + 0.3 * (kp90 / REF["occasions_90"])
-                      + 0.3 * (xa90 / REF["xa_90"])) * 100)
-    offensif = clamp((0.5 * (xg90 + xa90) / 1.2 + 0.3 * (sh90 / REF["tirs_90"])
-                      + 0.2 * (g90 + a90) / 1.2) * 100)
-    implication = clamp(chain90 / REF["chain_90"] * 100)
+    # --- Buteur ---
+    b1 = 0.60 * (g90 / REF["buts_90"])
+    b2 = 0.40 * (xg90 / REF["xg_90"])
+    buteur_raw = _curve(b1 + b2)
 
+    # --- Création ---
+    c1 = 0.45 * (a90 / REF["passes_90"])
+    c2 = 0.30 * (kp90 / REF["occasions_90"])
+    c3 = 0.25 * (xa90 / REF["xa_90"])
+    creation_raw = _curve(c1 + c2 + c3)
+
+    # --- Offensif ---
+    o1 = 0.50 * ((xg90 + xa90) / REF["xga_90"])
+    o2 = 0.30 * (sh90 / REF["tirs_90"])
+    o3 = 0.20 * ((g90 + a90) / REF["ga_90"])
+    offensif_raw = _curve(o1 + o2 + o3)
+
+    # --- Implication offensive ---
+    implication_raw = _curve(chain90 / REF["chain_90"])
+
+    # Ajustement fiabilité : sur un petit échantillon (début de saison, peu de
+    # minutes), les cadences par 90 sont volatiles. On ramène chaque sous-score
+    # vers un repli neutre proportionnellement au temps de jeu — cela évite
+    # qu'un joueur soit surnoté (buteur à 100 sur 3 matchs, par ex.).
     rel = clamp(minutes / RELIABILITY_MIN, 0, 1)
-    c_but = PLAYER_WEIGHTS["buteur"] * buteur * rel
-    c_cre = PLAYER_WEIGHTS["creation"] * creation * rel
-    c_off = PLAYER_WEIGHTS["offensif"] * offensif * rel
-    c_imp = PLAYER_WEIGHTS["implication"] * implication * rel
-    c_base = BASELINE * (1 - rel)
-    glob = round(c_but + c_cre + c_off + c_imp + c_base)
+
+    def _adj(raw):
+        return raw * rel + BASELINE * (1 - rel)
+
+    buteur = _adj(buteur_raw)
+    creation = _adj(creation_raw)
+    offensif = _adj(offensif_raw)
+    implication = _adj(implication_raw)
+    b_c = _split(buteur, [b1, b2])
+    c_c = _split(creation, [c1, c2, c3])
+    o_c = _split(offensif, [o1, o2, o3])
+
+    c_but = PLAYER_WEIGHTS["buteur"] * buteur
+    c_cre = PLAYER_WEIGHTS["creation"] * creation
+    c_off = PLAYER_WEIGHTS["offensif"] * offensif
+    c_imp = PLAYER_WEIGHTS["implication"] * implication
+    glob = round(c_but + c_cre + c_off + c_imp)
 
     def score(val, comps):
         return {"score": round(val), "composantes": comps}
@@ -75,21 +127,21 @@ def analyze_player(doc):
                 {"libelle": "Score création", "poids": "30%", "detail": f"{round(creation)}/100", "contribution": round(c_cre)},
                 {"libelle": "Score offensif", "poids": "22%", "detail": f"{round(offensif)}/100", "contribution": round(c_off)},
                 {"libelle": "Implication offensive", "poids": "10%", "detail": f"{round(implication)}/100", "contribution": round(c_imp)},
-                {"libelle": "Ajustement temps de jeu", "poids": "—", "detail": f"{int(minutes)} min jouées (fiabilité {round(rel*100)}%)", "contribution": round(c_base)},
+                {"libelle": "Fiabilité (temps de jeu)", "poids": "—", "detail": f"{int(minutes)} min jouées — fiabilité {round(rel*100)}%", "contribution": 0},
             ]},
             "buteur": score(buteur, [
-                {"libelle": "Buts / 90 min", "poids": "60%", "detail": f"{g90:.2f}", "contribution": round(clamp(0.6 * g90 / REF['buts_90'] * 100))},
-                {"libelle": "xG / 90 min", "poids": "40%", "detail": f"{xg90:.2f}", "contribution": round(clamp(0.4 * xg90 / REF['xg_90'] * 100))},
+                {"libelle": "Buts / 90 min", "poids": "60%", "detail": f"{g90:.2f}", "contribution": b_c[0]},
+                {"libelle": "xG / 90 min", "poids": "40%", "detail": f"{xg90:.2f}", "contribution": b_c[1]},
             ]),
             "creation": score(creation, [
-                {"libelle": "Passes décisives / 90", "poids": "40%", "detail": f"{a90:.2f}", "contribution": round(0.4 * (a90 / REF['passes_90']) * 100)},
-                {"libelle": "Occasions créées / 90", "poids": "30%", "detail": f"{kp90:.2f}", "contribution": round(0.3 * (kp90 / REF['occasions_90']) * 100)},
-                {"libelle": "xA / 90", "poids": "30%", "detail": f"{xa90:.2f}", "contribution": round(0.3 * (xa90 / REF['xa_90']) * 100)},
+                {"libelle": "Passes décisives / 90", "poids": "45%", "detail": f"{a90:.2f}", "contribution": c_c[0]},
+                {"libelle": "Occasions créées / 90", "poids": "30%", "detail": f"{kp90:.2f}", "contribution": c_c[1]},
+                {"libelle": "xA / 90", "poids": "25%", "detail": f"{xa90:.2f}", "contribution": c_c[2]},
             ]),
             "offensif": score(offensif, [
-                {"libelle": "xG + xA / 90", "poids": "50%", "detail": f"{(xg90+xa90):.2f}", "contribution": round(clamp(0.5 * (xg90 + xa90) / 1.2 * 100))},
-                {"libelle": "Tirs / 90", "poids": "30%", "detail": f"{sh90:.2f}", "contribution": round(0.3 * (sh90 / REF['tirs_90']) * 100)},
-                {"libelle": "Buts + passes / 90", "poids": "20%", "detail": f"{(g90+a90):.2f}", "contribution": round(clamp(0.2 * (g90 + a90) / 1.2 * 100))},
+                {"libelle": "xG + xA / 90", "poids": "50%", "detail": f"{(xg90+xa90):.2f}", "contribution": o_c[0]},
+                {"libelle": "Tirs / 90", "poids": "30%", "detail": f"{sh90:.2f}", "contribution": o_c[1]},
+                {"libelle": "Buts + passes / 90", "poids": "20%", "detail": f"{(g90+a90):.2f}", "contribution": o_c[2]},
             ]),
             "forme": {"score": round(implication), "composantes": [
                 {"libelle": "Implication offensive (xGChain / 90)", "poids": "100%",
@@ -116,12 +168,16 @@ def analyze_player(doc):
 
 def player_scoring_config():
     return {
-        "source": "Understat (saison en cours) — statistiques individuelles réelles, xG/xA inclus.",
-        "couverture": "Premier League, La Liga, Bundesliga, Serie A, Ligue 1. "
-                      "Portugal (Primeira Liga) et Pays-Bas (Eredivisie) : données joueurs indisponibles.",
-        "normalisation": "Toutes les métriques sont ramenées à 90 minutes, puis normalisées sur 100.",
+        "source": "Understat (5 grands championnats) et FotMob (Portugal, Pays-Bas) — "
+                  "statistiques individuelles réelles de la saison en cours, xG/xA inclus.",
+        "couverture": "Premier League, La Liga, Bundesliga, Serie A, Ligue 1 (Understat) ; "
+                      "Primeira Liga et Eredivisie (FotMob).",
+        "normalisation": "Toutes les métriques sont ramenées à 90 minutes.",
+        "calibration": f"Échelle exigeante : score = 100 × (production / référence élite)^{CURVE_EXP}. "
+                       "Un profil réellement élite approche 90-100, un bon joueur ~65-75, un joueur moyen ~45-55.",
         "ajustement_echantillon": f"Le score global est pondéré par le temps de jeu (fiabilité pleine à "
                                   f"{int(RELIABILITY_MIN)} min) pour éviter qu'un joueur soit surnoté sur très peu de minutes.",
         "score_joueur": PLAYER_WEIGHTS,
         "references_par_90": REF,
+        "note_source": "FotMob ne fournit pas le xGChain : l'implication offensive y est approximée par xG + xA.",
     }

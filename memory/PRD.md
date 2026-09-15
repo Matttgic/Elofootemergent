@@ -53,12 +53,17 @@ Belgique/Écosse/Turquie non couvertes par l'offre gratuite (omises, extensibles
 ## Backlog priorisé
 - P2 : Découper server.py en routers (matches/players/stats)
 - P2 : Rafraîchir le cache /stats en tâche de fond après chaque ingest
-- P2 : Données joueurs Portugal/Pays-Bas si source gratuite ; scores exacts fréquents par écart
 - P1 : Cache des analyses par championnat (perf leaderboard toutes ligues)
-- P2 : Fiche joueur dédiée (page) avec évolution de forme
-- P2 : Données joueurs pour Portugal/Pays-Bas si source gratuite trouvée
 - P2 : Ajout championnats (Belgique/Écosse/Turquie) si source dispo
-- P2 : Filtre par poste sur le classement joueurs, favoris, thème clair
+- P2 : Journal match par match FotMob pour la forme récente des joueurs PPL/DED
+- P2 : Thème clair
+
+### 2026-09-15 — Scores fréquents + recalibration joueurs + FotMob (Portugal/Pays-Bas)
+- [x] Stats : scores exacts les plus fréquents par tranche d'écart de notes (vue équipe mieux notée), jusqu'à 4 par tranche, %/n — /api/stats -> par_ecart_note[].scores_frequents + affichage Stats.jsx
+- [x] Recalibration des NOTES JOUEURS (buteur/création/offensif) : échelle exigeante score=100×(prod/réf élite)^0.72, ajustement fiabilité (RELIABILITY_MIN=900) appliqué aux sous-scores -> fin des notes gonflées en petit échantillon. Formule des NOTES ÉQUIPE INCHANGÉE (scoring.py non modifié)
+- [x] Nouvelle source gratuite FotMob (sans clé) pour joueurs Portugal (PPL) et Pays-Bas (DED) : data.fotmob.com/stats/{lid}/season/{sid}/{stat}.json, saison alignée sur football-data. 819 joueurs (DED 402, PPL 417), 100% rapprochés aux team_id. player_id préfixé "fm". xGChain approximé par xG+xA (documenté)
+- [x] fotmob_client.py (nouveau) ; player_ingest.ingest_fotmob_players ; ingest.run_ingest l'appelle ; server.py PLAYER_LEAGUES (Understat ∪ FotMob) pour /match, /leaderboard/players ; get_player_form renvoie None pour ids "fm"
+- [x] Tests backend 11/11 (iteration_9.json). Régression Understat OK
 
 ## Prochaines actions
 Voir Next Action Items du récap de finish.
