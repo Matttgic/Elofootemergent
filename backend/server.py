@@ -132,6 +132,25 @@ def _match_summary(m):
     }
 
 
+def _calibration(sd, home_score, away_score, home_name, away_name):
+    """Indicateur rapide : écart de notes + % de victoire du favori observé
+    historiquement pour cette tranche d'écart (statistiques descriptives)."""
+    if home_score is None or away_score is None:
+        return None
+    gap = abs(home_score - away_score)
+    fav = home_name if home_score >= away_score else away_name
+    fav_cote = "domicile" if home_score >= away_score else "exterieur"
+    for lo, hi, label in STAT_BUCKETS:
+        if lo <= gap < hi:
+            b = next((x for x in sd.get("par_ecart_note", []) if x["tranche"] == label), None)
+            if b and b.get("matchs"):
+                return {"ecart": gap, "tranche": label, "favori": fav, "favori_cote": fav_cote,
+                        "favori_gagne_pct": b["note_sup_gagne_pct"], "nul_pct": b["nul_pct"],
+                        "outsider_gagne_pct": b["note_inf_gagne_pct"], "echantillon": b["matchs"]}
+            return None
+    return None
+
+
 async def _top_players(team_id, code, limit=4, min_minutes=90):
     if team_id is None or code not in PLAYER_LEAGUES:
         return None
@@ -230,6 +249,7 @@ async def matches(code: str | None = None, date: str | None = None):
         by_code.setdefault(d["competition_code"], []).append(d)
 
     out = []
+    sd = await stats_analytics(None)
     for c, ms in by_code.items():
         all_m, pos_map, rows, meta = await _load_comp(c)
         for m in ms:
@@ -239,6 +259,14 @@ async def matches(code: str | None = None, date: str | None = None):
             item["competition"] = {"code": c, "nom": COMPETITION_META.get(c, {}).get("nom")}
             item["domicile"] = _compact(_analyze(all_m, pos_map, rows, meta, hid))
             item["exterieur"] = _compact(_analyze(all_m, pos_map, rows, meta, aid))
+            dom, ext = item["domicile"], item["exterieur"]
+            item["calibration"] = _calibration(
+                sd,
+                dom["global"] if dom else None,
+                ext["global"] if ext else None,
+                dom["nom_court"] if dom else "Domicile",
+                ext["nom_court"] if ext else "Extérieur",
+            )
             out.append(item)
     out.sort(key=lambda x: x.get("utc_date") or "")
     return {"date": target, "matchs": out}

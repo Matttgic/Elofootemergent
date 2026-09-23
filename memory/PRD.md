@@ -67,3 +67,7 @@ Belgique/Écosse/Turquie non couvertes par l'offre gratuite (omises, extensibles
 
 ## Prochaines actions
 Voir Next Action Items du récap de finish.
+
+### 2026-09-23 — Tranches d'écart étendues + repère rapide dans les matchs du jour
+- [x] Stats : ajout des tranches 30–35, 35–40, 40–45, 45–50 et 50+ (l'ancienne « 30+ » est remplacée). Tendance monotone confirmée (favori 44% → 92% de victoires selon l'écart)
+- [x] Repère rapide sur chaque carte de match (accueil) : écart de notes + favori + barre tricolore (favori/nul/surprise) avec %, via /api/matches -> item.calibration (helper _calibration réutilisant la calibration descriptive). Vérifié desktop + mobile

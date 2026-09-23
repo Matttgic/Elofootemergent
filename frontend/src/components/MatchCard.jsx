@@ -26,6 +26,7 @@ export function MatchCard({ match, index = 0 }) {
   const finished = match.status === "FINISHED";
   const inplay = ["IN_PLAY", "PAUSED"].includes(match.status);
   const h = match.domicile, a = match.exterieur;
+  const cal = match.calibration;
   const testid = `match-card-${match.match_id}`;
 
   return (
@@ -70,6 +71,27 @@ export function MatchCard({ match, index = 0 }) {
               <ScoreBadge score={a?.global} size="sm" testid={`${testid}-away-global`} />
             </div>
           </div>
+
+          {cal && (
+            <div className="mt-3 rounded-lg bg-slate-800/40 border border-slate-800 px-3 py-2" data-testid={`${testid}-calibration`}>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] uppercase tracking-wide text-slate-500 font-head">Écart de notes</span>
+                <span className="text-[11px] font-stat font-bold text-slate-200" data-testid={`${testid}-gap`}>
+                  {cal.ecart} pts · <span className="text-emerald-400">{cal.favori}</span>
+                </span>
+              </div>
+              <div className="flex h-2 rounded-full overflow-hidden bg-slate-900" title={`Sur ${cal.echantillon} matchs comparables`}>
+                <div style={{ width: `${cal.favori_gagne_pct}%` }} className="bg-emerald-500 transition-[width] duration-500" />
+                <div style={{ width: `${cal.nul_pct}%` }} className="bg-slate-600 transition-[width] duration-500" />
+                <div style={{ width: `${cal.outsider_gagne_pct}%` }} className="bg-rose-500 transition-[width] duration-500" />
+              </div>
+              <div className="flex items-center justify-between mt-1 text-[10px] font-stat">
+                <span className="text-emerald-400" data-testid={`${testid}-fav-pct`}>{cal.favori_gagne_pct}% favori</span>
+                <span className="text-slate-500">{cal.nul_pct}% nul</span>
+                <span className="text-rose-400">{cal.outsider_gagne_pct}% surprise</span>
+              </div>
+            </div>
+          )}
 
           {(h || a) && (
             <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 mt-4 pt-3 border-t border-slate-800">
