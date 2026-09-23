@@ -68,6 +68,12 @@ Belgique/Écosse/Turquie non couvertes par l'offre gratuite (omises, extensibles
 ## Prochaines actions
 Voir Next Action Items du récap de finish.
 
+### 2026-09-23 (2) — Tri par écart, filtre Value, forme FotMob
+- [x] Accueil : tri des matchs du jour par écart de notes décroissant (bouton « Trier par écart », data-testid sort-ecart-toggle)
+- [x] Filtre + repère « Value » : matchs où favori_gagne_pct ≥ 68 % ET score exact fréquent ≥ 20 % (échantillon ≥ 10). Badge VALUE ambre sur la carte + bouton filtre avec compteur. /api/matches -> calibration.value + calibration.score_frequent
+- [x] Forme récente des joueurs FotMob (Portugal/Pays-Bas) : fetch_player_recent (api/data/playerData, sans clé) + compute_fotmob_form (buts+passes 55 % / note de match FotMob 45 %, pondérés récence). get_player_form branche sur FotMob pour les ids « fm »
+- [x] Tests full-stack 100% (iteration_10.json : 3 backend + 4 flows frontend)
+
 ### 2026-09-23 — Tranches d'écart étendues + repère rapide dans les matchs du jour
 - [x] Stats : ajout des tranches 30–35, 35–40, 40–45, 45–50 et 50+ (l'ancienne « 30+ » est remplacée). Tendance monotone confirmée (favori 44% → 92% de victoires selon l'écart)
 - [x] Repère rapide sur chaque carte de match (accueil) : écart de notes + favori + barre tricolore (favori/nul/surprise) avec %, via /api/matches -> item.calibration (helper _calibration réutilisant la calibration descriptive). Vérifié desktop + mobile

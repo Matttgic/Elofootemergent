@@ -1,0 +1,23 @@
+{
+  "summary": "Iteration 10 full-stack verification for FootPulse: calibration+value on /api/matches, FotMob forme_recente activation for DED/PPL, Understat regression, and frontend UI (sort-ecart, value filter, calibration/top-score indicators, FotMob player page). All 3 backend tests + 4 frontend flows passed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter10.py",
+    "/app/test_reports/pytest/pytest_iter10.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "player_form.py: FotMob compute_fotmob_form uses rating * clamp(...) with base 6.0. If rating is 0 (missing), contribution is 0 which is correct but silently reduces score — consider skipping missing-rating matches instead of treating them as 0.",
+    "server.py is now 676 lines and getting close to a split; extract player/leaderboard routes into a dedicated module.",
+    "MatchCard shows gap in 'pts · TEAM' format but the request wording is 'NN pts' — current display works and includes the favourite name, worth confirming with product before assuming NN pts is a strict spec."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter10.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "None required (no auth).",
+  "seed_data_creation": "None; used existing seeded matches (2026-08-31) and FotMob DED/PPL players (e.g. fm351999 Weghorst).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend: pytest /app/backend/tests/test_iter10.py (3 tests). forme_recente shape is {form_score:{score,composantes:[{libelle,poids,detail,contribution},...]}, resume, matchs[]} — form_score is a dict, NOT scalar. Weights are string '55%'/'45%' for FotMob and '50%'/'50%' for Understat. Frontend: date-picker=input[type=date], date to use=2026-08-31 (8 matches, 3 value). Gap testid text is like '43 pts · Roma'. Value toggle text shows count (e.g. 'Value 3'). FotMob player URL /joueur/fm351999 renders player-recent-form correctly.",
+  "rca of the issue": "N/A — no bugs found. Feature set works end-to-end."
+}
