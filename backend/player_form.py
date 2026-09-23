@@ -70,3 +70,54 @@ def compute_recent_form(matches, team_title, n=RECENT_N):
         "resume": {"matchs": len(recent), "buts": tot_g, "passes": tot_a, "minutes": tot_min},
         "matchs": detail,
     }
+
+
+def compute_fotmob_form(recent_matches, n=RECENT_N):
+    """Forme récente d'un joueur FotMob (Portugal/Pays-Bas) à partir de ses vrais
+    derniers matchs. FotMob ne fournit pas le xG/xA par match : on combine la
+    production offensive (buts+passes) et la note de match FotMob, pondérées par
+    la récence. Aucune donnée n'est inventée."""
+    played = [m for m in recent_matches
+              if m.get("playedInMatch") and _i(m.get("minutesPlayed")) > 0]
+    played.sort(key=lambda m: (m.get("matchDate") or {}).get("utcTime") or "", reverse=True)
+    recent = played[:n]
+    if not recent:
+        return None
+
+    w = _norm_weights(len(recent))
+    ga_vals, rating_vals, detail = [], [], []
+    tot_g = tot_a = tot_min = 0
+    for m in recent:
+        g, a, tm = _i(m.get("goals")), _i(m.get("assists")), _i(m.get("minutesPlayed"))
+        rating = _f((m.get("ratingProps") or {}).get("rating"))
+        ga_vals.append(g + a)
+        rating_vals.append(clamp((rating - 6.0) / 3.0 * 100) if rating else 0)
+        tot_g += g
+        tot_a += a
+        tot_min += tm
+        home = bool(m.get("isHomeTeam"))
+        hg, ag = _i(m.get("homeScore")), _i(m.get("awayScore"))
+        pour, contre = (hg, ag) if home else (ag, hg)
+        detail.append({
+            "date": (m.get("matchDate") or {}).get("utcTime"),
+            "adversaire": m.get("opponentTeamName"),
+            "lieu": "Domicile" if home else "Extérieur",
+            "buts": g, "passes": a, "minutes": tm, "resultat": _res(pour, contre),
+        })
+
+    wg_ga = _wavg(ga_vals, w)
+    wg_rating = _wavg(rating_vals, w)
+    c_ga = clamp(0.55 * clamp(wg_ga * 100))
+    c_rating = clamp(0.45 * wg_rating)
+    score = round(clamp(c_ga + c_rating))
+
+    return {
+        "form_score": {"score": score, "composantes": [
+            {"libelle": f"Buts + passes (pondérés, {len(recent)} derniers matchs)", "poids": "55%",
+             "detail": f"{tot_g} buts, {tot_a} passes", "contribution": round(c_ga)},
+            {"libelle": "Note de match FotMob (pondérée)", "poids": "45%",
+             "detail": f"{(wg_rating/100*3+6):.2f}/10 en moyenne", "contribution": round(c_rating)},
+        ]},
+        "resume": {"matchs": len(recent), "buts": tot_g, "passes": tot_a, "minutes": tot_min},
+        "matchs": detail,
+    }

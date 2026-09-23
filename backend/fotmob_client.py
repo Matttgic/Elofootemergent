@@ -25,6 +25,7 @@ HEADERS = {
 
 DEEP = "https://www.fotmob.com/api/data/leagueseasondeepstats"
 DATA = "https://data.fotmob.com/stats/{lid}/season/{sid}/{stat}.json"
+PLAYER_DATA = "https://www.fotmob.com/api/data/playerData"
 
 # Statistiques FotMob nécessaires (nom FotMob -> clé interne). total_scoring_att
 # est fourni PAR 90 MIN (les autres sont des totaux de saison).
@@ -139,6 +140,15 @@ async def fetch_league_players(lid: int, target_name: str | None = None):
                 logger.warning("FotMob %s/%s stat %s échec: %s", lid, sid, stat, ex)
 
         return sid, sname, list(players.values())
+
+
+async def fetch_player_recent(fotmob_id):
+    """Derniers matchs joués d'un joueur (toutes compétitions), sans clé API."""
+    async with httpx.AsyncClient(timeout=25, headers=HEADERS, follow_redirects=True) as client:
+        r = await client.get(PLAYER_DATA, params={"id": fotmob_id})
+        r.raise_for_status()
+        return r.json().get("recentMatches") or []
+
 
 
 def fotmob_poste(positions):

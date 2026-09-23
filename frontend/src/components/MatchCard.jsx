@@ -5,7 +5,7 @@ import { ScoreBar } from "./ScoreBar";
 import { FormChips } from "./FormChips";
 import { DataUnavailable } from "./DataUnavailable";
 import { kickoff } from "../lib/format";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Zap } from "lucide-react";
 
 function TeamRow({ team, side }) {
   if (!team) return <div className="text-sm text-slate-500 py-2">Équipe inconnue</div>;
@@ -73,9 +73,16 @@ export function MatchCard({ match, index = 0 }) {
           </div>
 
           {cal && (
-            <div className="mt-3 rounded-lg bg-slate-800/40 border border-slate-800 px-3 py-2" data-testid={`${testid}-calibration`}>
+            <div className={`mt-3 rounded-lg px-3 py-2 border ${cal.value ? "bg-amber-500/10 border-amber-500/40" : "bg-slate-800/40 border-slate-800"}`} data-testid={`${testid}-calibration`}>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] uppercase tracking-wide text-slate-500 font-head">Écart de notes</span>
+                <span className="text-[10px] uppercase tracking-wide text-slate-500 font-head flex items-center gap-1.5">
+                  Écart de notes
+                  {cal.value && (
+                    <span className="inline-flex items-center gap-0.5 text-amber-400 font-bold" data-testid={`${testid}-value-badge`}>
+                      <Zap className="w-3 h-3 fill-amber-400" /> VALUE
+                    </span>
+                  )}
+                </span>
                 <span className="text-[11px] font-stat font-bold text-slate-200" data-testid={`${testid}-gap`}>
                   {cal.ecart} pts · <span className="text-emerald-400">{cal.favori}</span>
                 </span>
@@ -90,6 +97,15 @@ export function MatchCard({ match, index = 0 }) {
                 <span className="text-slate-500">{cal.nul_pct}% nul</span>
                 <span className="text-rose-400">{cal.outsider_gagne_pct}% surprise</span>
               </div>
+              {cal.score_frequent && (
+                <div className="mt-1.5 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[10px]">
+                  <span className="text-slate-500 uppercase tracking-wide">Score le + fréquent</span>
+                  <span className="font-stat" data-testid={`${testid}-top-score`}>
+                    <b className="text-slate-100 tabular-nums">{cal.score_frequent.score}</b>
+                    <span className="text-emerald-400 ml-1.5">{cal.score_frequent.pct}%</span>
+                  </span>
+                </div>
+              )}
             </div>
           )}
 

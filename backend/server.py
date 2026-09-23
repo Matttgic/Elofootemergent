@@ -13,9 +13,9 @@ from datetime import datetime, timezone
 from scoring import analyze_team, scoring_config, paris_date
 from signals import build_signals, head_to_head, h2h_insight
 from player_scoring import analyze_player, player_scoring_config
-from player_form import compute_recent_form
+from player_form import compute_recent_form, compute_fotmob_form
 from understat_client import UNDERSTAT_LEAGUES, fetch_player_matches
-from fotmob_client import FOTMOB_LEAGUES
+from fotmob_client import FOTMOB_LEAGUES, fetch_player_recent
 from ingest import run_ingest, run_light_ingest, configured_codes, COMPETITION_META, is_cup
 from football_client import get_token
 
@@ -144,9 +144,14 @@ def _calibration(sd, home_score, away_score, home_name, away_name):
         if lo <= gap < hi:
             b = next((x for x in sd.get("par_ecart_note", []) if x["tranche"] == label), None)
             if b and b.get("matchs"):
+                sf = b.get("scores_frequents") or []
+                top = sf[0] if sf else None
+                fav_pct = b["note_sup_gagne_pct"]
+                value = bool(top and b["matchs"] >= 10 and fav_pct >= 68 and top["pct"] >= 20)
                 return {"ecart": gap, "tranche": label, "favori": fav, "favori_cote": fav_cote,
-                        "favori_gagne_pct": b["note_sup_gagne_pct"], "nul_pct": b["nul_pct"],
-                        "outsider_gagne_pct": b["note_inf_gagne_pct"], "echantillon": b["matchs"]}
+                        "favori_gagne_pct": fav_pct, "nul_pct": b["nul_pct"],
+                        "outsider_gagne_pct": b["note_inf_gagne_pct"], "echantillon": b["matchs"],
+                        "score_frequent": top, "value": value}
             return None
     return None
 
@@ -162,10 +167,10 @@ async def _top_players(team_id, code, limit=4, min_minutes=90):
 
 
 async def get_player_form(pid):
-    """Forme récente d'un joueur, avec cache (18h) dans player_form."""
+    """Forme récente d'un joueur, avec cache (18h) dans player_form.
+    Understat pour les 5 grands championnats, FotMob pour Portugal/Pays-Bas."""
     from datetime import timedelta
-    if str(pid).startswith("fm"):
-        return None  # journal match par match indisponible pour la source FotMob
+    is_fm = str(pid).startswith("fm")
     doc = await db.player_form.find_one({"_id": pid})
     if doc:
         try:
@@ -174,20 +179,25 @@ async def get_player_form(pid):
                 return doc.get("data")
         except Exception:  # noqa: BLE001
             pass
-    pdoc = await db.players.find_one({"player_id": pid}, {"_id": 0, "team_title": 1})
-    if not pdoc:
-        return doc.get("data") if doc else None
     try:
-        matches = await fetch_player_matches(pid)
-        data = compute_recent_form(matches, pdoc.get("team_title"))
+        if is_fm:
+            recent = await fetch_player_recent(str(pid)[2:])
+            data = compute_fotmob_form(recent)
+        else:
+            pdoc = await db.players.find_one({"player_id": pid}, {"_id": 0, "team_title": 1})
+            if not pdoc:
+                return doc.get("data") if doc else None
+            matches = await fetch_player_matches(pid)
+            data = compute_recent_form(matches, pdoc.get("team_title"))
     except Exception as e:  # noqa: BLE001
         logger.error("Forme joueur %s échec: %s", pid, e)
         return doc.get("data") if doc else None
-    await db.player_form.update_one(
-        {"_id": pid},
-        {"$set": {"_id": pid, "updated_at": datetime.now(timezone.utc).isoformat(), "data": data}},
-        upsert=True,
-    )
+    if data:
+        await db.player_form.update_one(
+            {"_id": pid},
+            {"$set": {"_id": pid, "updated_at": datetime.now(timezone.utc).isoformat(), "data": data}},
+            upsert=True,
+        )
     return data
 
 

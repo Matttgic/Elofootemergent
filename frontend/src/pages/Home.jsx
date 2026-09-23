@@ -3,7 +3,7 @@ import { api } from "../lib/api";
 import { MatchCard } from "../components/MatchCard";
 import { frDate, frDateShort, todayISO, timeAgo } from "../lib/format";
 import { Skeleton } from "../components/ui/skeleton";
-import { ChevronLeft, ChevronRight, CalendarDays, AlertCircle, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, CalendarDays, AlertCircle, RefreshCw, ArrowDownWideNarrow, Zap } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { motion } from "framer-motion";
 import { useFavorites } from "../lib/useFavorites";
@@ -33,6 +33,8 @@ export default function Home() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [statut, setStatut] = useState("tous");
+  const [tri, setTri] = useState("heure");
+  const [valueOnly, setValueOnly] = useState(false);
   const { favs } = useFavorites();
 
   const loadStatus = useCallback(() => {
@@ -63,11 +65,16 @@ export default function Home() {
   };
 
   const allMatchs = data?.matchs || [];
-  const matchs = allMatchs.filter((m) => {
+  let matchs = allMatchs.filter((m) => {
     if (statut === "a_venir") return !["FINISHED", "IN_PLAY", "PAUSED"].includes(m.status);
     if (statut === "termines") return m.status === "FINISHED";
     return true;
   });
+  if (valueOnly) matchs = matchs.filter((m) => m.calibration?.value);
+  if (tri === "ecart") {
+    matchs = [...matchs].sort((a, b) => (b.calibration?.ecart ?? -1) - (a.calibration?.ecart ?? -1));
+  }
+  const valueCount = allMatchs.filter((m) => m.calibration?.value).length;
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-6">
@@ -147,8 +154,8 @@ export default function Home() {
         ))}
       </div>
 
-      {/* Status filter */}
-      <div className="flex items-center gap-2 mb-6">
+      {/* Status filter + sort + value */}
+      <div className="flex items-center gap-2 mb-6 flex-wrap">
         {[["tous", "Tous"], ["a_venir", "À venir"], ["termines", "Terminés"]].map(([v, l]) => (
           <button key={v} onClick={() => setStatut(v)} data-testid={`status-filter-${v}`}
             className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
@@ -156,6 +163,18 @@ export default function Home() {
             {l}
           </button>
         ))}
+        <span className="w-px h-5 bg-slate-700 mx-1" />
+        <button onClick={() => setTri(tri === "ecart" ? "heure" : "ecart")} data-testid="sort-ecart-toggle"
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+            tri === "ecart" ? "bg-emerald-500 text-white" : "bg-slate-800/60 text-slate-400 hover:bg-slate-800"}`}>
+          <ArrowDownWideNarrow className="w-3.5 h-3.5" /> Trier par écart
+        </button>
+        <button onClick={() => setValueOnly((v) => !v)} data-testid="value-filter-toggle"
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+            valueOnly ? "bg-amber-500 text-slate-900" : "bg-slate-800/60 text-slate-400 hover:bg-slate-800"}`}>
+          <Zap className={`w-3.5 h-3.5 ${valueOnly ? "fill-slate-900" : ""}`} /> Value
+          {valueCount > 0 && <span className={`ml-0.5 tabular-nums ${valueOnly ? "text-slate-900" : "text-amber-400"}`}>{valueCount}</span>}
+        </button>
       </div>
 
       {loading ? (
