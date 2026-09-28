@@ -1,18 +1,11 @@
 """Iteration 7: goals recalibration, /api/stats, removal of /api/admin/ingest."""
-import os
 import statistics
 import pytest
 import requests
 
-BASE_URL = ''
-try:
-    with open('/app/frontend/.env') as f:
-        for line in f:
-            if line.startswith('REACT_APP_BACKEND_URL='):
-                BASE_URL = line.split('=', 1)[1].strip().rstrip('/')
-except Exception:
-    pass
-API = f"{BASE_URL}/api"
+from backend_url import API
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(scope="module")
@@ -102,7 +95,7 @@ def test_stats_global(s):
         assert 0 <= ah[k] <= 100
     par = d["par_ecart_note"]
     labels = [b["tranche"] for b in par]
-    assert labels == ["0–3", "3–6", "6–10", "10–15", "15+"]
+    assert labels == ["0–5", "5–10", "10–15", "15–20", "20–25", "25–30", "30–35", "35–40", "40–45", "45–50", "50+"]
     for b in par:
         for k in ("matchs", "note_sup_gagne_pct", "nul_pct", "note_inf_gagne_pct"):
             assert k in b

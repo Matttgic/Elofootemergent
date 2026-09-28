@@ -6,7 +6,9 @@ import requests
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://match-insights-173.preview.emergentagent.com').rstrip('/')
+from backend_url import BASE_URL
+
+pytestmark = pytest.mark.integration
 TIMEOUT = 90
 load_dotenv("/app/backend/.env")
 

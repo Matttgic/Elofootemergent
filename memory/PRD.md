@@ -94,3 +94,14 @@ Voir Next Action Items du récap de finish.
 - [x] Score défensif : buts encaissés ajustés au niveau de l'adversaire (facteur 1 − 0.25 × force), symétrique de l'offensif. Change légèrement les notes équipe ; texte anti-biais de la méthodologie mis à jour
 - [x] Modèle de Poisson (signaux) : moyennes d'équipe ramenées vers la moyenne du championnat (poids = 4 matchs) — plus d'espérances de buts extrêmes sur 2-3 matchs en début de saison
 - [x] Tests unitaires : 15 au total (backend/tests/test_unit_models.py)
+
+### 2026-09-28 (3) — Qualité et maintenance
+- [x] server.py (≈ 830 lignes) découpé : core.py (config, MongoDB), analytics.py (chargement championnat, analyses, calibration, stats), jobs.py (synchronisations), routers/matches.py, routers/players.py, routers/stats.py (stats + paris). Point d'entrée inchangé (uvicorn server:app). Réponses de l'API vérifiées identiques sur 212 appels, hors ajouts ci-dessous
+- [x] Cache des analyses d'équipes par championnat et des stats (10 min, vidé après chaque synchro), verrou par clé, calculs lourds dans un thread : plus de recalcul complet à chaque requête ni de boucle asynchrone bloquée
+- [x] Doublons supprimés : calibration de /match (même helper que /matches → ajoute favori_cote, score_frequent, value), document match de l'ingestion complète, normalisation des noms d'équipe (teamnames.py commun)
+- [x] Rapprochements d'équipes : suppression de l'alias « Paris » du PSG (captait Paris FC selon l'ordre), alias The Odds API pour « Rennes » et « Inter Milan » — vérifiés sur les 7 championnats
+- [x] COMPETITIONS par défaut = les 12 compétitions gratuites (alignement code/production) ; quota de /api/status calculé
+- [x] requirements.txt réduit aux 10 dépendances d'exécution (au lieu du pip freeze de 130 paquets) ; outils de test/lint dans requirements-dev.txt
+- [x] Tests : URL du backend centralisée (tests/backend_url.py), tests d'intégration marqués `integration` et ignorés sans backend configuré (plus d'URL de préproduction codée en dur), tranches d'écart périmées corrigées ; nouveau tests/test_api_offline.py (tous les endpoints sur MongoDB simulé) — 27 tests hors ligne
+- [x] Frontend : nom d'équipe cliquable vers sa fiche dans le détail du match (lien mort « # ») ; légende du classement joueurs (Understat + FotMob)
+- [x] README.md rédigé (architecture, sources, configuration, lancement, tests)

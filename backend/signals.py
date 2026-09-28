@@ -3,7 +3,7 @@
 Chaque signal expose : marché, statut, confiance et une explication chiffrée
 fondée sur les données réelles récentes des deux équipes.
 """
-from scoring import extract_records, _norm_weights, _wavg
+from scoring import extract_records
 
 
 def _rate(recs, pred):

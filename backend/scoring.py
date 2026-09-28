@@ -9,7 +9,7 @@ Les tirs / occasions / xG ne sont PAS fournis par la source gratuite :
 ils sont donc marqués "Donnée indisponible" et exclus des calculs, les
 coefficients restant documentés ci-dessous.
 """
-from datetime import datetime, timezone
+from datetime import datetime
 from itertools import groupby
 from zoneinfo import ZoneInfo
 

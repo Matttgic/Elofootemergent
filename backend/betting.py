@@ -3,9 +3,10 @@
 Fonctions pures (sans base de données) afin d'être testables isolément.
 """
 import difflib
-import unicodedata
 from datetime import datetime, timezone
 from itertools import groupby
+
+from teamnames import normalize_team_name
 
 # Version du modèle de paris. Les paris figés avant la v2 (probabilités gonflées
 # par la calibration non chronologique, appariement cotes/matchs trop permissif)
@@ -20,15 +21,11 @@ MIN_TEAM_SIM = 0.6        # similarité minimale de chaque nom d'équipe
 VOID_AFTER_H = 72         # match non joué dans ce délai après l'horaire prévu => pari annulé
 
 
-def _tn(name):
-    if not name:
-        return ""
-    s = unicodedata.normalize("NFKD", str(name).lower())
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    drop = {"fc", "cf", "ac", "sc", "as", "rc", "sv", "cd", "ud", "afc", "1", "calcio",
-            "club", "de", "sad", "ss", "us", "bk", "if", "sk", "the"}
-    toks = [t for t in "".join(c if c.isalnum() else " " for c in s).split() if t not in drop]
-    return " ".join(toks)
+# Noms The Odds API trop éloignés de football-data pour la similarité seule
+ODDS_ALIASES = {
+    "Rennes": "Stade Rennais",   # « rennes » ressemble plus à « nantes » qu'à « stade rennais »
+    "Inter Milan": "Inter",      # sinon ex æquo avec l'AC Milan (« milan » ⊂ « inter milan »)
+}
 
 
 def _name_sim(a, b):
@@ -44,8 +41,8 @@ def _name_sim(a, b):
 
 def team_similarity(odds_name, fd_team):
     """Similarité (0-1) entre un nom The Odds API et une équipe football-data."""
-    a = _tn(odds_name)
-    return max(_name_sim(a, _tn(fd_team.get(k))) for k in ("name", "shortName"))
+    a = normalize_team_name(ODDS_ALIASES.get(odds_name, odds_name))
+    return max(_name_sim(a, normalize_team_name(fd_team.get(k))) for k in ("name", "shortName"))
 
 
 def _parse(iso):
