@@ -35,7 +35,7 @@ function BetSimulation({ sim }) {
   const s = sim.strategies[strat];
   const t = s.total[stake];
   const stratLabel = { favori: "Favori", value: "Value" };
-  const stakeLabel = { mise_fixe: "Mise fixe (1 u)", kelly: "Kelly (bankroll 100 u)" };
+  const stakeLabel = { mise_fixe: "Mise fixe (1 u)", kelly: "¼ Kelly (bankroll 100 u)" };
 
   return (
     <div className="card-surface rounded-xl p-5 mt-4" data-testid="stat-bet-simulation">
@@ -82,7 +82,7 @@ function BetSimulation({ sim }) {
             <div className="rounded-lg bg-slate-800/50 p-3">
               <div className="text-[10px] uppercase text-slate-500">Taux de réussite</div>
               <div className="text-xl font-black font-stat text-cyan-400">{s.total.taux_reussite}%</div>
-              <div className="text-[11px] text-slate-500">book {stake === "kelly" ? "Kelly" : "1 u/match"}</div>
+              <div className="text-[11px] text-slate-500">book {stake === "kelly" ? "¼ Kelly" : "1 u/match"}</div>
             </div>
             <div className="rounded-lg bg-slate-800/50 p-3">
               <div className="text-[10px] uppercase text-slate-500">Gain net</div>
@@ -125,6 +125,11 @@ function BetSimulation({ sim }) {
             <p className="text-[11px] text-slate-500 mt-3">+ {sim.en_attente} paris en attente (matchs à venir).</p>
           )}
         </>
+      )}
+      {sim.paris_anciens_exclus > 0 && (
+        <p className="text-[11px] text-slate-500 mt-1" data-testid="sim-old-excluded">
+          {sim.paris_anciens_exclus} paris figés avec l'ancien modèle (probabilités biaisées) sont exclus du bilan.
+        </p>
       )}
     </div>
   );

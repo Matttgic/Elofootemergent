@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { ScoreBadge } from "../components/ScoreBadge";
@@ -25,7 +25,6 @@ export default function Leaderboards() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("equipes");
   const [playersByTri, setPlayersByTri] = useState({});
-  const [ploading, setPloading] = useState(false);
   const [poste, setPoste] = useState("Tous");
   const { isFav, toggle } = useFavorites();
 
@@ -38,15 +37,17 @@ export default function Leaderboards() {
       .then((r) => setTeams(r.data)).catch(() => setTeams([])).finally(() => setLoading(false));
   }, [code]);
 
+  // Une seule requête par (tri, poste), y compris en cas d'échec : l'erreur est
+  // mémorisée (null) au lieu de relancer la requête en boucle.
+  const requested = useRef(new Set());
   const loadPlayers = useCallback((tri) => {
     const key = `${tri}|${poste}`;
-    if (playersByTri[key]) return;
-    setPloading(true);
+    if (requested.current.has(key)) return;
+    requested.current.add(key);
     api.get("/leaderboard/players", { params: { tri, poste } })
       .then((r) => setPlayersByTri((prev) => ({ ...prev, [key]: r.data })))
-      .catch(() => setPlayersByTri((prev) => ({ ...prev, [key]: null })))
-      .finally(() => setPloading(false));
-  }, [playersByTri, poste]);
+      .catch(() => setPlayersByTri((prev) => ({ ...prev, [key]: null })));
+  }, [poste]);
 
   useEffect(() => {
     const cfg = PLAYER_TABS[tab];
@@ -55,7 +56,8 @@ export default function Leaderboards() {
 
   const renderPlayers = (key) => {
     const cfg = PLAYER_TABS[key];
-    const data = playersByTri[`${cfg.tri}|${poste}`];
+    const dataKey = `${cfg.tri}|${poste}`;
+    const data = playersByTri[dataKey];
     const posteFilter = (
       <div className="flex items-center gap-2 overflow-x-auto pb-2 mb-3" data-testid="poste-filter">
         {POSTES.map((pz) => (
@@ -65,7 +67,7 @@ export default function Leaderboards() {
         ))}
       </div>
     );
-    if (ploading && !data) {
+    if (!(dataKey in playersByTri)) {
       return <>{posteFilter}<div className="space-y-2">{[...Array(8)].map((_, i) => <Skeleton key={i} className="h-16 rounded-xl bg-slate-800/50" />)}</div></>;
     }
     if (!data?.disponible) {
