@@ -3,12 +3,15 @@ rapprochement cotes <-> matchs et mises Kelly."""
 import math
 import random
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from betting import KELLY_CAP, kelly_fraction, match_fixture, simulate, team_similarity  # noqa: E402
-from scoring import pre_match_ratings, standings_positions  # noqa: E402
+from betting import (KELLY_CAP, kelly_fraction, match_fixture, settle_outcome,  # noqa: E402
+                     simulate, team_similarity)
+from scoring import compute_defensif, compute_offensif, pre_match_ratings, standings_positions  # noqa: E402
+from signals import build_signals  # noqa: E402
 
 
 def _match(mid, date, hid, aid, gh=None, ga=None, home=None, away=None):
@@ -171,3 +174,58 @@ def test_simulate_flat_stake_unchanged():
     t = simulate([_bet("won", 2.5, 0.6, "a"), _bet("lost", 1.5, 0.6, "b")])
     assert t["paris"] == 2 and t["gagnes"] == 1 and t["taux_reussite"] == 50.0
     assert t["mise_fixe"] == {"mise_totale": 2.0, "gain_net": 0.5, "roi": 25.0, "bankroll": 100.5}
+
+
+# ---------------------------------------------------------------------------
+# Règlement des paris (reports / annulations)
+# ---------------------------------------------------------------------------
+KICK = "2026-10-04T15:00:00Z"
+NOW_SAME_DAY = datetime(2026, 10, 4, 18, tzinfo=timezone.utc)
+NOW_LATER = datetime(2026, 10, 9, 12, tzinfo=timezone.utc)   # > 72 h après l'horaire prévu
+
+
+def _fd(status, gh=None, ga=None, date=KICK):
+    return {"status": status, "utc_date": date, "score": {"fullTime": {"home": gh, "away": ga}}}
+
+
+def test_settle_finished_match():
+    home_bet = {"fav_side": "home", "commence_time": KICK}
+    assert settle_outcome(home_bet, _fd("FINISHED", 2, 1), NOW_SAME_DAY) == "won"
+    assert settle_outcome(home_bet, _fd("FINISHED", 1, 1), NOW_SAME_DAY) == "lost"
+    assert settle_outcome({"fav_side": "away", "commence_time": KICK}, _fd("FINISHED", 0, 3), NOW_SAME_DAY) == "won"
+
+
+def test_settle_voids_cancelled_and_postponed_matches():
+    bet = {"fav_side": "home", "commence_time": KICK}
+    assert settle_outcome(bet, _fd("CANCELLED"), NOW_SAME_DAY) == "void"
+    assert settle_outcome(bet, _fd("POSTPONED"), NOW_SAME_DAY) is None       # encore dans le délai
+    assert settle_outcome(bet, _fd("POSTPONED"), NOW_LATER) == "void"
+    assert settle_outcome(bet, _fd("TIMED", date="2026-12-01T20:00:00Z"), NOW_LATER) == "void"  # reprogrammé
+    assert settle_outcome(bet, None, NOW_LATER) == "void"
+    # reporté puis joué 5 jours plus tard : annulé, pas réglé sur le nouveau match
+    assert settle_outcome(bet, _fd("FINISHED", 2, 0, date="2026-10-09T19:00:00Z"), NOW_LATER) == "void"
+    assert settle_outcome(bet, _fd("TIMED"), NOW_SAME_DAY) is None
+
+
+# ---------------------------------------------------------------------------
+# Notes équipe : ajustement adversaire symétrique
+# ---------------------------------------------------------------------------
+def test_defence_adjusted_for_opponent_strength_like_attack():
+    pos_map = {10: (1, 20), 11: (20, 20)}   # 10 = leader, 11 = lanterne rouge
+    vs_strong = [{"gf": 1, "gc": 2, "opponent_id": 10} for _ in range(5)]
+    vs_weak = [{"gf": 1, "gc": 2, "opponent_id": 11} for _ in range(5)]
+    assert compute_defensif(vs_strong, pos_map)["score"] > compute_defensif(vs_weak, pos_map)["score"]
+    assert compute_offensif(vs_strong, pos_map)["score"] > compute_offensif(vs_weak, pos_map)["score"]
+
+
+# ---------------------------------------------------------------------------
+# Poisson : moyennes ramenées vers la moyenne du championnat
+# ---------------------------------------------------------------------------
+def test_poisson_expectations_shrunk_towards_league_average():
+    # 1 seul match chacun : l'équipe 1 a gagné 3-0 à domicile, l'équipe 2 a perdu 3-0 à l'extérieur.
+    # Sans rétrécissement : 3 × 3 / 1.45 = 6.2 buts attendus (plafonné à 3.5).
+    matches = [_match(1, "2026-08-01T15:00:00Z", 1, 3, 3, 0), _match(2, "2026-08-01T15:00:00Z", 4, 2, 3, 0)]
+    est = build_signals(matches, 1, 2, "A", "B", 1.45, 1.15)["buts_estimes"]
+    # (3 + 4×1.45)/5 = 1.76 marqués et encaissés -> 1.76 × 1.76 / 1.45
+    assert est["domicile"] == round(1.76 * 1.76 / 1.45, 2)
+    assert est["exterieur"] == round(0.92 * 0.92 / 1.15, 2)

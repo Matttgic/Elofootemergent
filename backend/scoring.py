@@ -152,7 +152,10 @@ def compute_defensif(recs, pos_map):
     if not recs:
         return None
     w = _norm_weights(len(recs))
-    cpm = _wavg([r["gc"] for r in recs], w)
+    # buts encaissés ajustés au niveau de l'adversaire (symétrique de l'offensif) :
+    # encaisser contre un fort pénalise moins que contre un faible
+    adj_gc = [r["gc"] * (1.0 - 0.25 * opp_strength(r["opponent_id"], pos_map)) for r in recs]
+    cpm = _wavg(adj_gc, w)
     s_conc = clamp((1 - cpm / GOALS_SCALE) * 100)
     cs = _wavg([1.0 if r["gc"] == 0 else 0.0 for r in recs], w) * 100
     n3 = min(3, len(recs))
@@ -165,7 +168,7 @@ def compute_defensif(recs, pos_map):
     return {
         "score": round(c1 + c2 + c3),
         "composantes": [
-            {"libelle": "Buts encaissés/match", "poids": "55%", "detail": f"{cpm:.2f} encaissés/match", "contribution": round(c1)},
+            {"libelle": "Buts encaissés/match (ajustés adversaire)", "poids": "55%", "detail": f"{cpm:.2f} encaissés/match", "contribution": round(c1)},
             {"libelle": "Cages inviolées (clean sheets)", "poids": "30%", "detail": f"{cs:.0f}% de matchs sans encaisser", "contribution": round(c2)},
             {"libelle": "Forme défensive récente (3 derniers)", "poids": "15%", "detail": f"{recent_gc:.2f} encaissés/match", "contribution": round(c3)},
         ],
@@ -341,8 +344,10 @@ def scoring_config():
         "principe": "Notation déterministe et reproductible fondée uniquement sur des résultats réels. "
                     "Les matchs récents pèsent davantage (décroissance géométrique, coefficient "
                     f"DECAY={DECAY} par match en remontant, fenêtre de {MAX_MATCHES} matchs).",
-        "anti_biais": "Les buts et résultats sont ajustés au niveau de l'adversaire (via le classement) "
-                      "pour éviter qu'une équipe soit surnotée en battant seulement des équipes faibles.",
+        "anti_biais": "Les résultats, les buts marqués et les buts encaissés sont ajustés au niveau de "
+                      "l'adversaire (via le classement) : marquer contre un faible compte moins, encaisser "
+                      "contre un fort pénalise moins. Cela évite qu'une équipe soit surnotée en ne jouant "
+                      "que des équipes faibles, ou sous-notée après un calendrier difficile.",
         "echelle": "Tous les scores sont normalisés sur 100.",
         "score_global": GLOBAL_WEIGHTS,
         "score_offensif": OFF_WEIGHTS,

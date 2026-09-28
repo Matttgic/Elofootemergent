@@ -126,6 +126,11 @@ function BetSimulation({ sim }) {
           )}
         </>
       )}
+      {sim.annules > 0 && (
+        <p className="text-[11px] text-slate-500 mt-1" data-testid="sim-voided">
+          {sim.annules} paris annulés (match annulé ou reporté au-delà de 72 h, mise remboursée).
+        </p>
+      )}
       {sim.paris_anciens_exclus > 0 && (
         <p className="text-[11px] text-slate-500 mt-1" data-testid="sim-old-excluded">
           {sim.paris_anciens_exclus} paris figés avec l'ancien modèle (probabilités biaisées) sont exclus du bilan.

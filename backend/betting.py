@@ -4,7 +4,7 @@ Fonctions pures (sans base de données) afin d'être testables isolément.
 """
 import difflib
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timezone
 from itertools import groupby
 
 # Version du modèle de paris. Les paris figés avant la v2 (probabilités gonflées
@@ -17,6 +17,7 @@ KELLY_FRACTION = 0.25     # quart de Kelly
 KELLY_CAP = 0.05          # mise maximale : 5 % de la bankroll courante par pari
 MATCH_WINDOW_H = 36       # écart max (h) entre le coup d'envoi des cotes et celui du match
 MIN_TEAM_SIM = 0.6        # similarité minimale de chaque nom d'équipe
+VOID_AFTER_H = 72         # match non joué dans ce délai après l'horaire prévu => pari annulé
 
 
 def _tn(name):
@@ -49,9 +50,10 @@ def team_similarity(odds_name, fd_team):
 
 def _parse(iso):
     try:
-        return datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
     except (AttributeError, ValueError):
         return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def match_fixture(fx, matches, window_h=MATCH_WINDOW_H, min_sim=MIN_TEAM_SIM):
@@ -74,6 +76,29 @@ def match_fixture(fx, matches, window_h=MATCH_WINDOW_H, min_sim=MIN_TEAM_SIM):
         if sh >= min_sim and sa >= min_sim and sh + sa > best_score:
             best, best_score = m, sh + sa
     return best
+
+
+def settle_outcome(bet, match, now):
+    """Issue d'un pari en attente : 'won', 'lost', 'void' (mise remboursée) ou None
+    (toujours en attente). Comme chez les bookmakers, un match annulé, attribué sur
+    tapis vert, ou non joué dans les VOID_AFTER_H heures suivant l'horaire prévu au
+    moment du pari (report, suspension) est annulé."""
+    match = match or {}
+    kick = _parse(bet.get("commence_time"))
+    late = VOID_AFTER_H * 3600
+    if match.get("status") == "CANCELLED":
+        return "void"
+    ft = (match.get("score") or {}).get("fullTime") or {}
+    h, a = ft.get("home"), ft.get("away")
+    if match.get("status") == "FINISHED" and h is not None and a is not None:
+        played = _parse(match.get("utc_date"))
+        if kick and played and (played - kick).total_seconds() > late:
+            return "void"   # reporté puis joué hors délai
+        result = "home" if h > a else ("away" if a > h else "draw")
+        return "won" if result == bet.get("fav_side") else "lost"
+    if kick and (now - kick).total_seconds() > late:
+        return "void"
+    return None
 
 
 def kelly_fraction(p, odds):
