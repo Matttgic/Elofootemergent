@@ -1,6 +1,8 @@
 """FootPulse iteration 10: calibration+value on /api/matches, FotMob forme_recente, Understat regression."""
 import os
 import asyncio
+from pathlib import Path
+
 import pytest
 import requests
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -10,7 +12,7 @@ from backend_url import BASE_URL
 
 pytestmark = pytest.mark.integration
 TIMEOUT = 90
-load_dotenv("/app/backend/.env")
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
 @pytest.fixture(scope="module")

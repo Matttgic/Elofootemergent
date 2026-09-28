@@ -10,7 +10,7 @@ def pytest_collection_modifyitems(config, items):
     if BASE_URL:
         return
     skip = pytest.mark.skip(reason="backend déployé non configuré "
-                                   "(REACT_APP_BACKEND_URL ou /app/frontend/.env)")
+                                   "(définir REACT_APP_BACKEND_URL)")
     for item in items:
         if "integration" in item.keywords:
             item.add_marker(skip)

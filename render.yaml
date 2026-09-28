@@ -1,0 +1,26 @@
+# Blueprint Render : API FastAPI (offre gratuite).
+# Render > New > Blueprint > ce dépôt, puis renseigner les variables marquées sync: false.
+# Les synchronisations tournent dans GitHub Actions (.github/workflows/sync.yml) car
+# l'offre gratuite met le service en veille après 15 min sans requête.
+services:
+  - type: web
+    name: footpulse-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: SCHEDULER_ENABLED
+        value: "false"
+      - key: DB_NAME
+        value: footpulse
+      - key: MONGO_URL            # chaîne de connexion MongoDB Atlas (mongodb+srv://…)
+        sync: false
+      - key: FOOTBALL_DATA_TOKEN  # sert à /api/status (bandeau « clé requise » sinon)
+        sync: false
+      - key: CORS_ORIGINS         # URL du frontend Vercel, ex. https://footpulse.vercel.app
+        sync: false

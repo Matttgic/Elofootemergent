@@ -1,5 +1,9 @@
 """Point d'entrée FastAPI (uvicorn server:app) : application, CORS, planification
-des synchronisations et démarrage. Les routes sont dans routers/."""
+des synchronisations et démarrage. Les routes sont dans routers/.
+
+SCHEDULER_ENABLED=false désactive les synchronisations internes (planificateur et
+rattrapage au démarrage), pour un hébergement qui se met en veille : elles sont
+alors lancées de l'extérieur avec `python -m jobs light|full` (voir README)."""
 import asyncio
 import logging
 import os
@@ -11,7 +15,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from core import client, db
 from football_client import get_token
-from jobs import run_full_guarded, run_light_guarded
+from jobs import ensure_indexes, run_full_guarded, run_light_guarded
 from routers import matches, players, stats
 
 logger = logging.getLogger(__name__)
@@ -23,7 +27,7 @@ for module in (matches, players, stats):
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=[o.strip() for o in (os.environ.get('CORS_ORIGINS') or '*').split(',') if o.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -31,12 +35,11 @@ app.add_middleware(
 scheduler = AsyncIOScheduler(timezone="UTC")
 
 
+def scheduler_enabled():
+    return os.environ.get("SCHEDULER_ENABLED", "true").strip().lower() not in ("0", "false", "no", "non")
+
+
 async def _startup_ingest():
-    await db.matches.create_index("match_id", unique=True)
-    await db.matches.create_index([("competition_code", 1), ("match_date", 1)])
-    await db.standings.create_index("competition_code", unique=True)
-    await db.players.create_index([("competition_code", 1), ("team_id", 1)])
-    await db.players.create_index("player_id")
     if not get_token():
         return
     nb = await db.matches.count_documents({})
@@ -58,6 +61,10 @@ async def _startup_ingest():
 
 @app.on_event("startup")
 async def on_startup():
+    await ensure_indexes()
+    if not scheduler_enabled():
+        logger.info("Synchronisations internes désactivées (SCHEDULER_ENABLED=false).")
+        return
     await _startup_ingest()
     # Rafraîchissement léger fréquent (1 appel API) pour les résultats + notes
     scheduler.add_job(run_light_guarded, "cron", minute=5,
@@ -70,5 +77,6 @@ async def on_startup():
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    scheduler.shutdown(wait=False)
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
     client.close()

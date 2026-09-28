@@ -1,4 +1,4 @@
-# Dépendances d'exécution du backend (versions identiques à l'image Emergent).
+# Dépendances d'exécution du backend.
 # Outils de test et de lint : requirements-dev.txt.
 fastapi==0.110.1
 starlette==0.37.2

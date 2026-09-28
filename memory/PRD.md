@@ -105,3 +105,10 @@ Voir Next Action Items du récap de finish.
 - [x] Tests : URL du backend centralisée (tests/backend_url.py), tests d'intégration marqués `integration` et ignorés sans backend configuré (plus d'URL de préproduction codée en dur), tranches d'écart périmées corrigées ; nouveau tests/test_api_offline.py (tous les endpoints sur MongoDB simulé) — 27 tests hors ligne
 - [x] Frontend : nom d'équipe cliquable vers sa fiche dans le détail du match (lien mort « # ») ; légende du classement joueurs (Understat + FotMob)
 - [x] README.md rédigé (architecture, sources, configuration, lancement, tests)
+
+### 2026-09-28 (4) — Sortie d'Emergent, déploiement gratuit
+- [x] Frontend sans Emergent : suppression du script assets.emergent.sh et de PostHog (enregistrement de session envoyé à ap.emergent.sh) dans index.html, titre/description FootPulse, paquets @emergentbase/* (téléchargés depuis assets.emergent.sh), overlay / visual-edits / sonde de santé dans craco.config.js, identifiants de test du modèle. yarn.lock commité (registre npm public uniquement) ; build de production vérifié avec CI=true
+- [x] Fichiers de la plateforme supprimés : .emergent/ (cron vers leur API interne), .gitconfig, test_result.md, test_reports/, tests/ racine vide ; chemins /app/… retirés des tests
+- [x] Cible d'hébergement gratuite : frontend Vercel (frontend/vercel.json, réécritures SPA), API Render (render.yaml, SCHEDULER_ENABLED=false), MongoDB Atlas M0, synchronisations GitHub Actions (.github/workflows/sync.yml : hh:05 léger, 04:30 UTC complet, lancement manuel)
+- [x] Backend : `python -m jobs light|full` (code de sortie ≠ 0 en cas d'échec), SCHEDULER_ENABLED, création des index partagée, CORS_ORIGINS vide = `*`
+- [x] Tests d'intégration opt-in via REACT_APP_BACKEND_URL ; 29 tests hors ligne ; .env.example backend/frontend ; README : guide de déploiement pas à pas
