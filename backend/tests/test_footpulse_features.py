@@ -91,7 +91,8 @@ def _get_finished_match_id(s, code):
     import asyncio, os as _os
     from motor.motor_asyncio import AsyncIOMotorClient
     from dotenv import load_dotenv
-    load_dotenv("/app/backend/.env")
+    from pathlib import Path as _Path
+    load_dotenv(_Path(__file__).resolve().parents[1] / ".env")
     async def _q():
         c = AsyncIOMotorClient(_os.environ['MONGO_URL'])
         db = c[_os.environ['DB_NAME']]

@@ -1,0 +1,57 @@
+name: Synchronisation des données
+
+# Remplace le planificateur interne de l'API (Render gratuit se met en veille) :
+# - toutes les heures à hh:05 : résultats récents (1 appel football-data) ;
+# - chaque jour à 04:30 UTC : analyse complète (saison, classements, joueurs, cotes).
+# Secrets requis : MONGO_URL, FOOTBALL_DATA_TOKEN ; optionnel : ODDS_API_KEY.
+# Variables optionnelles : DB_NAME (défaut footpulse), COMPETITIONS.
+on:
+  schedule:
+    - cron: "5 * * * *"
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "light = résultats récents, full = analyse complète"
+        type: choice
+        options: [full, light]
+        default: full
+
+concurrency:
+  group: footpulse-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Synchronisation
+        env:
+          MONGO_URL: ${{ secrets.MONGO_URL }}
+          DB_NAME: ${{ vars.DB_NAME || 'footpulse' }}
+          FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          COMPETITIONS: ${{ vars.COMPETITIONS }}
+          MODE_MANUEL: ${{ github.event.inputs.mode }}
+          PLANIFICATION: ${{ github.event.schedule }}
+        run: |
+          if [ -n "$MODE_MANUEL" ]; then
+            MODE="$MODE_MANUEL"
+          elif [ "$PLANIFICATION" = "30 4 * * *" ]; then
+            MODE=full
+          else
+            MODE=light
+          fi
+          echo "Mode : $MODE"
+          python -m jobs "$MODE"

@@ -198,3 +198,19 @@ def test_analyses_cached_then_refreshed_after_sync(api):
     assert api.get("/api/team/PL/1").json()["stats"]["matchs_analyses"] == before   # cache
     asyncio.run(jobs.run_light_guarded())   # sans jeton : pas d'appel API, mais caches vidés
     assert api.get("/api/team/PL/1").json()["stats"]["matchs_analyses"] == before + 1
+
+
+def test_startup_without_internal_scheduler(api, monkeypatch):
+    """Hébergement en veille : index créés, mais ni planificateur ni synchro au démarrage."""
+    import server
+    monkeypatch.setenv("SCHEDULER_ENABLED", "false")
+    asyncio.run(server.on_startup())
+    assert not server.scheduler.running
+    assert "match_id_1" in asyncio.run(server.db.matches.index_information())
+
+
+def test_sync_command_fails_loudly_without_token(api, capsys):
+    """`python -m jobs light` renvoie un code d'erreur si le jeton manque (visible dans le cron)."""
+    import jobs
+    assert asyncio.run(jobs.main("light")) == 1
+    assert "token_manquant" in capsys.readouterr().out
