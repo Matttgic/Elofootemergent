@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { Skeleton } from "../components/ui/skeleton";
-import { PieChart, TrendingUp, Home as HomeIcon, Scale } from "lucide-react";
+import { PieChart, TrendingUp, Home as HomeIcon, Scale, Coins, Clock } from "lucide-react";
 
 function TriBar({ a, b, c, labels }) {
   const av = a ?? 0, bv = b ?? 0, cv = c ?? 0;
@@ -21,12 +21,125 @@ function TriBar({ a, b, c, labels }) {
   );
 }
 
+function Money({ v }) {
+  const pos = v > 0, neg = v < 0;
+  return <span className={`font-stat font-bold tabular-nums ${pos ? "text-emerald-400" : neg ? "text-red-400" : "text-slate-300"}`}>
+    {pos ? "+" : ""}{v?.toFixed ? v.toFixed(1) : v} u
+  </span>;
+}
+
+function BetSimulation({ sim }) {
+  const [strat, setStrat] = useState("favori");
+  const [stake, setStake] = useState("mise_fixe");
+  if (!sim) return null;
+  const s = sim.strategies[strat];
+  const t = s.total[stake];
+  const stratLabel = { favori: "Favori", value: "Value" };
+  const stakeLabel = { mise_fixe: "Mise fixe (1 u)", kelly: "Kelly (bankroll 100 u)" };
+
+  return (
+    <div className="card-surface rounded-xl p-5 mt-4" data-testid="stat-bet-simulation">
+      <div className="flex items-center gap-2 mb-1">
+        <Coins className="w-5 h-5 text-amber-400" />
+        <h3 className="font-head font-bold text-slate-100">Simulation de paris</h3>
+      </div>
+      <p className="text-xs text-slate-500 mb-4">{sim.regles}</p>
+
+      <div className="flex flex-wrap gap-2 mb-4">
+        {["favori", "value"].map((k) => (
+          <button key={k} onClick={() => setStrat(k)} data-testid={`sim-strat-${k}`}
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+              strat === k ? "bg-amber-500 text-slate-900" : "bg-slate-800/60 text-slate-400 hover:bg-slate-800"}`}>
+            {stratLabel[k]}
+          </button>
+        ))}
+        <span className="w-px h-5 bg-slate-700 mx-1" />
+        {["mise_fixe", "kelly"].map((k) => (
+          <button key={k} onClick={() => setStake(k)} data-testid={`sim-stake-${k}`}
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+              stake === k ? "bg-emerald-500 text-white" : "bg-slate-800/60 text-slate-400 hover:bg-slate-800"}`}>
+            {stakeLabel[k]}
+          </button>
+        ))}
+      </div>
+
+      {!sim.disponible ? (
+        <div className="rounded-lg bg-slate-800/50 border border-slate-700 p-4 flex items-center gap-3" data-testid="sim-pending">
+          <Clock className="w-5 h-5 text-cyan-400 shrink-0" />
+          <p className="text-sm text-slate-300">
+            <b className="text-slate-100">{sim.en_attente} paris en attente.</b> Les cotes réelles sont figées pour les matchs à venir ;
+            le bilan gains/pertes s'affichera dès que ces matchs seront joués.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4" data-testid="sim-total">
+            <div className="rounded-lg bg-slate-800/50 p-3">
+              <div className="text-[10px] uppercase text-slate-500">Paris réglés</div>
+              <div className="text-xl font-black font-stat text-slate-100">{s.total.paris}</div>
+              <div className="text-[11px] text-slate-500">{s.total.gagnes} gagnés</div>
+            </div>
+            <div className="rounded-lg bg-slate-800/50 p-3">
+              <div className="text-[10px] uppercase text-slate-500">Taux de réussite</div>
+              <div className="text-xl font-black font-stat text-cyan-400">{s.total.taux_reussite}%</div>
+              <div className="text-[11px] text-slate-500">book {stake === "kelly" ? "Kelly" : "1 u/match"}</div>
+            </div>
+            <div className="rounded-lg bg-slate-800/50 p-3">
+              <div className="text-[10px] uppercase text-slate-500">Gain net</div>
+              <div className="text-xl"><Money v={t.gain_net} /></div>
+              <div className="text-[11px] text-slate-500">ROI {t.roi}%</div>
+            </div>
+            <div className="rounded-lg bg-slate-800/50 p-3">
+              <div className="text-[10px] uppercase text-slate-500">Bankroll (dép. 100 u)</div>
+              <div className={`text-xl font-black font-stat tabular-nums ${t.bankroll >= 100 ? "text-emerald-400" : "text-red-400"}`}>{t.bankroll}</div>
+              <div className="text-[11px] text-slate-500">misé {t.mise_totale} u</div>
+            </div>
+          </div>
+
+          <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-2">Détail par tranche d'écart</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-[10px] uppercase text-slate-500 text-left border-b border-slate-800">
+                  <th className="py-1.5 pr-2">Écart</th>
+                  <th className="py-1.5 px-2 text-right">Paris</th>
+                  <th className="py-1.5 px-2 text-right">Réussite</th>
+                  <th className="py-1.5 px-2 text-right">Gain net</th>
+                  <th className="py-1.5 pl-2 text-right">ROI</th>
+                </tr>
+              </thead>
+              <tbody>
+                {s.par_ecart.map((r) => (
+                  <tr key={r.tranche} className="border-b border-slate-800/60" data-testid={`sim-row-${r.tranche}`}>
+                    <td className="py-1.5 pr-2 text-slate-300">{r.tranche}</td>
+                    <td className="py-1.5 px-2 text-right font-stat text-slate-400">{r.paris}</td>
+                    <td className="py-1.5 px-2 text-right font-stat text-cyan-400">{r.taux_reussite}%</td>
+                    <td className="py-1.5 px-2 text-right"><Money v={r[stake].gain_net} /></td>
+                    <td className="py-1.5 pl-2 text-right font-stat text-slate-300">{r[stake].roi}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {sim.en_attente > 0 && (
+            <p className="text-[11px] text-slate-500 mt-3">+ {sim.en_attente} paris en attente (matchs à venir).</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function sTaux(s) { return s.total.mise_fixe.taux_reussite; }
+
 export default function Stats() {
   const [d, setD] = useState(null);
+  const [sim, setSim] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api.get("/stats").then((r) => setD(r.data)).catch(() => setD(null)).finally(() => setLoading(false));
+    api.get("/bets/simulation").then((r) => setSim(r.data)).catch(() => setSim(null));
   }, []);
 
   if (loading) return <div className="max-w-3xl mx-auto px-4 py-6 space-y-4"><Skeleton className="h-40 rounded-xl bg-slate-800/50" /><Skeleton className="h-64 rounded-xl bg-slate-800/50" /></div>;
@@ -107,6 +220,8 @@ export default function Stats() {
         </div>
         <p className="text-[11px] text-slate-500 mt-4">{d.note}</p>
       </div>
+
+      <BetSimulation sim={sim} />
     </div>
   );
 }

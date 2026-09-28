@@ -16,6 +16,7 @@ from player_scoring import analyze_player, player_scoring_config
 from player_form import compute_recent_form, compute_fotmob_form
 from understat_client import UNDERSTAT_LEAGUES, fetch_player_matches
 from fotmob_client import FOTMOB_LEAGUES, fetch_player_recent
+from odds_client import fetch_odds, ODDS_SPORT
 from ingest import run_ingest, run_light_ingest, configured_codes, COMPETITION_META, is_cup
 from football_client import get_token
 
@@ -54,11 +55,144 @@ async def _guarded(factory):
 
 
 async def run_full_guarded():
-    return await _guarded(lambda: run_ingest(db))
+    res = await _guarded(lambda: run_ingest(db))
+    try:
+        await settle_bets()
+        await snapshot_bets()
+    except Exception as e:  # noqa: BLE001
+        logger.error("Simulation paris (full) échec: %s", e)
+    return res
 
 
 async def run_light_guarded():
-    return await _guarded(lambda: run_light_ingest(db))
+    res = await _guarded(lambda: run_light_ingest(db))
+    try:
+        await settle_bets()
+    except Exception as e:  # noqa: BLE001
+        logger.error("Règlement paris (light) échec: %s", e)
+    return res
+
+
+# ---------------------------------------------------------------------------
+# Simulation de paris (cotes réelles The Odds API — stratégies Favori & Value)
+# ---------------------------------------------------------------------------
+import difflib
+import unicodedata
+
+
+def _tn(name):
+    if not name:
+        return ""
+    s = unicodedata.normalize("NFKD", str(name).lower())
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    drop = {"fc", "cf", "ac", "sc", "as", "rc", "sv", "cd", "ud", "afc", "1", "calcio",
+            "club", "de", "sad", "ss", "us", "bk", "if", "sk", "the"}
+    toks = [t for t in "".join(c if c.isalnum() else " " for c in s).split() if t not in drop]
+    return " ".join(toks)
+
+
+def _team_eq(odds_name, fd_team):
+    a = _tn(odds_name)
+    cands = [_tn(fd_team.get("name")), _tn(fd_team.get("shortName")), _tn(fd_team.get("tla"))]
+    for b in cands:
+        if not a or not b:
+            continue
+        if a == b or a in b or b in a:
+            return True
+        if difflib.SequenceMatcher(None, a, b).ratio() >= 0.72:
+            return True
+        if set(a.split()) & set(b.split()):
+            return True
+    return False
+
+
+def _match_fixture(fx, matches):
+    for m in matches:
+        ht, at = m.get("home_team") or {}, m.get("away_team") or {}
+        if _team_eq(fx["home_team"], ht) and _team_eq(fx["away_team"], at):
+            return m
+    return None
+
+
+async def snapshot_bets():
+    """Fige un pari (cote favori + écart de notes) pour chaque match à venir dont
+    on obtient les vraies cotes. Idempotent (un pari par match)."""
+    if not os.environ.get("ODDS_API_KEY"):
+        return {"ok": False, "raison": "cle_absente"}
+    sd = await stats_analytics(None)
+    created = 0
+    for code, sport in ODDS_SPORT.items():
+        try:
+            fixtures = await fetch_odds(sport)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Cotes %s échec: %s", code, e)
+            continue
+        if not fixtures:
+            continue
+        all_m, pos_map, rows, meta = await _load_comp(code)
+        upcoming = [m for m in all_m if m.get("status") in ("TIMED", "SCHEDULED", "POSTPONED")]
+        for fx in fixtures:
+            if not (fx.get("home_odds") and fx.get("away_odds")):
+                continue
+            m = _match_fixture(fx, upcoming)
+            if not m:
+                continue
+            mid = m["match_id"]
+            if await db.bets.find_one({"_id": mid}):
+                continue
+            hid = (m.get("home_team") or {}).get("id")
+            aid = (m.get("away_team") or {}).get("id")
+            home = _analyze(all_m, pos_map, rows, meta, hid)
+            away = _analyze(all_m, pos_map, rows, meta, aid)
+            if not (home and away and home.get("global") and away.get("global")):
+                continue
+            cal = _calibration(sd, home["global"]["score"], away["global"]["score"],
+                               home["nom_court"], away["nom_court"])
+            if not cal:
+                continue
+            fav_side = "home" if cal["favori_cote"] == "domicile" else "away"
+            fav_odds = fx["home_odds"] if fav_side == "home" else fx["away_odds"]
+            if not fav_odds or fav_odds <= 1:
+                continue
+            p = cal["favori_gagne_pct"] / 100.0
+            implied = 1.0 / fav_odds
+            b = fav_odds - 1
+            kelly_f = max(0.0, min(1.0, (b * p - (1 - p)) / b)) if b > 0 else 0.0
+            await db.bets.insert_one({
+                "_id": mid, "competition_code": code, "ecart": cal["ecart"], "tranche": cal["tranche"],
+                "fav_side": fav_side, "fav_nom": cal["favori"], "fav_odds": round(fav_odds, 3),
+                "home_odds": fx["home_odds"], "draw_odds": fx["draw_odds"], "away_odds": fx["away_odds"],
+                "bookmaker": fx["bookmaker"], "model_prob": round(p, 4), "implied_prob": round(implied, 4),
+                "is_value": p > implied, "kelly_f": round(kelly_f, 4),
+                "commence_time": fx["commence_time"],
+                "snapshot_at": datetime.now(timezone.utc).isoformat(), "status": "pending",
+            })
+            created += 1
+    logger.info("Paris figés (snapshot) : %s nouveaux", created)
+    return {"ok": True, "crees": created}
+
+
+async def settle_bets():
+    """Règle les paris en attente dont le match est terminé (aucun appel API)."""
+    pending = await db.bets.find({"status": "pending"}).to_list(2000)
+    settled = 0
+    for bet in pending:
+        m = await db.matches.find_one({"match_id": bet["_id"]}, {"_id": 0, "status": 1, "score": 1})
+        if not m or m.get("status") != "FINISHED":
+            continue
+        ft = (m.get("score") or {}).get("fullTime") or {}
+        h, a = ft.get("home"), ft.get("away")
+        if h is None or a is None:
+            continue
+        result = "home" if h > a else ("away" if a > h else "draw")
+        won = result == bet["fav_side"]
+        await db.bets.update_one({"_id": bet["_id"]},
+                                 {"$set": {"status": "won" if won else "lost", "resultat": result,
+                                           "settled_at": datetime.now(timezone.utc).isoformat()}})
+        settled += 1
+    if settled:
+        logger.info("Paris réglés : %s", settled)
+    return settled
 
 
 # ---------------------------------------------------------------------------
@@ -619,6 +753,51 @@ async def stats_analytics(code: str | None = None):
     }
     _stats_cache[ck] = (datetime.now(timezone.utc), result)
     return result
+
+
+@api_router.get("/bets/simulation")
+async def bets_simulation():
+    """Simulation de paris sur cotes réelles : P&L par tranche d'écart et au total,
+    pour 2 stratégies (Favori, Value), chacune en mise fixe (1 u) et Kelly (bankroll 100 u)."""
+    bets = await db.bets.find({}, {"_id": 0}).to_list(5000)
+    settled = [b for b in bets if b.get("status") in ("won", "lost")]
+    pending = [b for b in bets if b.get("status") == "pending"]
+
+    def calc(lst):
+        n = len(lst)
+        wins = sum(1 for b in lst if b["status"] == "won")
+        pnl_f = sum((b["fav_odds"] - 1) if b["status"] == "won" else -1 for b in lst)
+        staked_k = sum(b["kelly_f"] * 100 for b in lst)
+        pnl_k = sum((b["kelly_f"] * 100 * (b["fav_odds"] - 1)) if b["status"] == "won"
+                    else -(b["kelly_f"] * 100) for b in lst)
+        return {
+            "paris": n, "gagnes": wins,
+            "taux_reussite": round(wins / n * 100, 1) if n else 0,
+            "mise_fixe": {"mise_totale": round(n * 1.0, 2), "gain_net": round(pnl_f, 2),
+                          "roi": round(pnl_f / n * 100, 1) if n else 0, "bankroll": round(100 + pnl_f, 2)},
+            "kelly": {"mise_totale": round(staked_k, 2), "gain_net": round(pnl_k, 2),
+                      "roi": round(pnl_k / staked_k * 100, 1) if staked_k > 0 else 0,
+                      "bankroll": round(100 + pnl_k, 2)},
+        }
+
+    def agg(subset):
+        by = {}
+        for b in subset:
+            by.setdefault(b["tranche"], []).append(b)
+        par = [{"tranche": lbl, **calc(by[lbl])} for _, _, lbl in STAT_BUCKETS if lbl in by]
+        return {"total": calc(subset), "par_ecart": par}
+
+    return {
+        "disponible": len(settled) > 0,
+        "bankroll_initiale": 100,
+        "en_attente": len(pending),
+        "regles": "Pari sur l'équipe la mieux notée (1N2), aux vraies cotes du bookmaker "
+                  "(France en priorité, sinon bet365/pinnacle). Le P&L se construit au fil des "
+                  "matchs joués. Value = pari placé seulement quand la probabilité du modèle "
+                  "dépasse la probabilité implicite de la cote.",
+        "strategies": {"favori": agg(settled),
+                       "value": agg([b for b in settled if b.get("is_value")])},
+    }
 
 
 app.include_router(api_router)
