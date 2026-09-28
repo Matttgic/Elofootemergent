@@ -5,6 +5,8 @@ import unicodedata
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
+from pymongo import ReplaceOne
+
 from understat_client import fetch_players, UNDERSTAT_LEAGUES
 from fotmob_client import fetch_league_players, FOTMOB_LEAGUES, fotmob_poste
 
@@ -85,6 +87,19 @@ def current_season():
     return n.year if n.month >= 7 else n.year - 1
 
 
+async def _replace_league_players(db, code, docs, now):
+    """Remplace les joueurs d'un championnat sans jamais le laisser vide : upsert
+    des joueurs reçus puis suppression de ceux absents de cette synchro. Une
+    réponse vide de la source conserve les données existantes."""
+    if not docs:
+        logger.warning("Joueurs %s : réponse vide de la source — données existantes conservées", code)
+        return
+    await db.players.bulk_write([
+        ReplaceOne({"competition_code": code, "player_id": d["player_id"]}, d, upsert=True) for d in docs
+    ])
+    await db.players.delete_many({"competition_code": code, "last_synced_at": {"$ne": now}})
+
+
 async def ingest_players(db):
     season = current_season()
     now = datetime.now(timezone.utc).isoformat()
@@ -134,9 +149,7 @@ async def ingest_players(db):
                 "last_synced_at": now,
             })
 
-        await db.players.delete_many({"competition_code": code})
-        if docs:
-            await db.players.insert_many(docs)
+        await _replace_league_players(db, code, docs, now)
         total += len(docs)
         logger.info("Joueurs %s: %s (équipes rapprochées %s/%s)", code, len(docs), len(tmap), len(titles))
 
@@ -206,10 +219,7 @@ async def ingest_fotmob_players(db):
                 "last_synced_at": now,
             })
 
-        # Ne pas écraser les données existantes si la récupération FotMob est vide
-        if docs:
-            await db.players.delete_many({"competition_code": code})
-            await db.players.insert_many(docs)
+        await _replace_league_players(db, code, docs, now)
         total += len(docs)
         logger.info("Joueurs FotMob %s (saison %s): %s (équipes rapprochées %s/%s)",
                     code, sname, len(docs), len(tmap), len(titles))

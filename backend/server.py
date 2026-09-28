@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from scoring import analyze_team, scoring_config, paris_date, pre_match_ratings, MIN_HISTORY
 from signals import build_signals, head_to_head, h2h_insight
-from betting import MODELE_PARIS, match_fixture, kelly_fraction, simulate
+from betting import MODELE_PARIS, match_fixture, kelly_fraction, settle_outcome, simulate
 from player_scoring import analyze_player, player_scoring_config
 from player_form import compute_recent_form, compute_fotmob_form
 from understat_client import UNDERSTAT_LEAGUES, fetch_player_matches
@@ -137,22 +137,23 @@ async def snapshot_bets():
 
 
 async def settle_bets():
-    """Règle les paris en attente dont le match est terminé (aucun appel API)."""
+    """Règle les paris en attente (aucun appel API) : gagné/perdu si le match est
+    terminé, annulé (mise remboursée) si le match est annulé ou reporté hors délai."""
     pending = await db.bets.find({"status": "pending"}).to_list(2000)
+    now = datetime.now(timezone.utc)
     settled = 0
     for bet in pending:
-        m = await db.matches.find_one({"match_id": bet["_id"]}, {"_id": 0, "status": 1, "score": 1})
-        if not m or m.get("status") != "FINISHED":
+        m = await db.matches.find_one({"match_id": bet["_id"]},
+                                      {"_id": 0, "status": 1, "score": 1, "utc_date": 1})
+        outcome = settle_outcome(bet, m, now)
+        if outcome is None:
             continue
-        ft = (m.get("score") or {}).get("fullTime") or {}
+        ft = ((m or {}).get("score") or {}).get("fullTime") or {}
         h, a = ft.get("home"), ft.get("away")
-        if h is None or a is None:
-            continue
-        result = "home" if h > a else ("away" if a > h else "draw")
-        won = result == bet["fav_side"]
+        result = None if outcome == "void" else ("home" if h > a else ("away" if a > h else "draw"))
         await db.bets.update_one({"_id": bet["_id"]},
-                                 {"$set": {"status": "won" if won else "lost", "resultat": result,
-                                           "settled_at": datetime.now(timezone.utc).isoformat()}})
+                                 {"$set": {"status": outcome, "resultat": result,
+                                           "settled_at": now.isoformat()}})
         settled += 1
     if settled:
         logger.info("Paris réglés : %s", settled)
@@ -513,7 +514,9 @@ async def team(code: str, team_id: int):
 
 @api_router.get("/leaderboard/teams")
 async def leaderboard_teams(code: str | None = None):
-    codes = [code] if code else configured_codes()
+    # « Tous » = championnats uniquement : les coupes dupliqueraient les clubs
+    # (note calculée sur une autre compétition) et mêleraient des sélections nationales.
+    codes = [code] if code else [c for c in configured_codes() if not is_cup(c)]
     result = []
     for c in codes:
         all_m, pos_map, rows, meta = await _load_comp(c)
@@ -733,6 +736,7 @@ async def bets_simulation():
     anciens = await db.bets.count_documents({"modele": {"$not": {"$gte": MODELE_PARIS}}})
     settled = [b for b in bets if b.get("status") in ("won", "lost")]
     pending = [b for b in bets if b.get("status") == "pending"]
+    voided = [b for b in bets if b.get("status") == "void"]
 
     def agg(subset):
         by = {}
@@ -745,13 +749,15 @@ async def bets_simulation():
         "disponible": len(settled) > 0,
         "bankroll_initiale": 100,
         "en_attente": len(pending),
+        "annules": len(voided),
         "paris_anciens_exclus": anciens,
         "regles": "Pari sur l'équipe la mieux notée (1N2), aux vraies cotes du bookmaker "
                   "(France en priorité, sinon bet365/pinnacle). Le P&L se construit au fil des "
                   "matchs joués. Probabilité du modèle = % de victoire du favori observé avant-match "
                   "dans la même tranche d'écart. Value = pari placé seulement quand cette probabilité "
                   "dépasse la probabilité implicite de la cote. Kelly = quart de Kelly, plafonné à 5 % "
-                  "de la bankroll courante.",
+                  "de la bankroll courante. Un match annulé ou non joué dans les 72 h suivant l'horaire "
+                  "prévu annule le pari (mise remboursée).",
         "strategies": {"favori": agg(settled),
                        "value": agg([b for b in settled if b.get("is_value")])},
     }

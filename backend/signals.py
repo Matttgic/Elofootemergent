@@ -13,8 +13,14 @@ def _rate(recs, pred):
     return hits / len(recs), hits, len(recs)
 
 
-def _avg(vals):
-    return sum(vals) / len(vals) if vals else 0.0
+PRIOR_MATCHES = 4   # poids, en matchs, de la moyenne du championnat dans les moyennes d'équipe
+
+
+def _shrunk(vals, prior):
+    """Moyenne d'équipe ramenée vers la moyenne du championnat : avec 2 matchs,
+    la ligue pèse 2/3 ; avec 10 matchs, moins de 30 %. Évite les espérances de
+    buts extrêmes en début de saison."""
+    return (sum(vals) + PRIOR_MATCHES * prior) / (len(vals) + PRIOR_MATCHES)
 
 
 def _confiance(margin, faible, eleve):
@@ -81,10 +87,12 @@ def build_signals(matches, home_id, away_id, home_name, away_name,
     lg_home_avg = lg_home_avg if lg_home_avg and lg_home_avg > 0.2 else 1.45
     lg_away_avg = lg_away_avg if lg_away_avg and lg_away_avg > 0.2 else 1.15
 
-    h_scored = _avg([r["gf"] for r in (home_at_home or home_all)])
-    h_conceded = _avg([r["gc"] for r in (home_at_home or home_all)])
-    a_scored = _avg([r["gf"] for r in (away_at_away or away_all)])
-    a_conceded = _avg([r["gc"] for r in (away_at_away or away_all)])
+    h_recs = home_at_home or home_all
+    a_recs = away_at_away or away_all
+    h_scored = _shrunk([r["gf"] for r in h_recs], lg_home_avg)
+    h_conceded = _shrunk([r["gc"] for r in h_recs], lg_away_avg)
+    a_scored = _shrunk([r["gf"] for r in a_recs], lg_away_avg)
+    a_conceded = _shrunk([r["gc"] for r in a_recs], lg_home_avg)
 
     exp_home = min(3.5, max(0.15, h_scored * a_conceded / lg_home_avg))
     exp_away = min(3.5, max(0.15, a_scored * h_conceded / lg_away_avg))

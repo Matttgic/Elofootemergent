@@ -86,3 +86,11 @@ Voir Next Action Items du récap de finish.
 - [x] POST /api/players/form : ids validés (liste, format Understat/FotMob) et appels externes uniquement pour des joueurs connus en base
 - [x] Classements joueurs : plus de boucle de requêtes infinie en cas d'erreur API
 - [x] Tests unitaires hors ligne : backend/tests/test_unit_models.py (11 tests)
+
+### 2026-09-28 (2) — Correctifs « moyens » de l'analyse
+- [x] Ingestion joueurs (Understat + FotMob) : upsert puis suppression des joueurs absents de la synchro — plus de collection vide pendant le remplacement ; une réponse vide de la source conserve les données existantes (player_ingest._replace_league_players)
+- [x] Classement équipes « Tous » : championnats uniquement (coupes exclues) — fin des doublons club/Ligue des champions et du mélange avec les sélections nationales ; les coupes restent consultables via leur filtre
+- [x] Paris : un match annulé, attribué sur tapis vert ou non joué dans les 72 h suivant l'horaire prévu annule le pari (statut void, mise remboursée, hors P&L) au lieu de rester « en attente » indéfiniment — betting.settle_outcome ; compteur « annules » sur /api/bets/simulation et la page Stats
+- [x] Score défensif : buts encaissés ajustés au niveau de l'adversaire (facteur 1 − 0.25 × force), symétrique de l'offensif. Change légèrement les notes équipe ; texte anti-biais de la méthodologie mis à jour
+- [x] Modèle de Poisson (signaux) : moyennes d'équipe ramenées vers la moyenne du championnat (poids = 4 matchs) — plus d'espérances de buts extrêmes sur 2-3 matchs en début de saison
+- [x] Tests unitaires : 15 au total (backend/tests/test_unit_models.py)
