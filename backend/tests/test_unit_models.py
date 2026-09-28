@@ -10,8 +10,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from betting import (KELLY_CAP, kelly_fraction, match_fixture, settle_outcome,  # noqa: E402
                      simulate, team_similarity)
+from player_ingest import build_team_map  # noqa: E402
 from scoring import compute_defensif, compute_offensif, pre_match_ratings, standings_positions  # noqa: E402
 from signals import build_signals  # noqa: E402
+from teamnames import normalize_team_name  # noqa: E402
 
 
 def _match(mid, date, hid, aid, gh=None, ga=None, home=None, away=None):
@@ -229,3 +231,37 @@ def test_poisson_expectations_shrunk_towards_league_average():
     # (3 + 4×1.45)/5 = 1.76 marqués et encaissés -> 1.76 × 1.76 / 1.45
     assert est["domicile"] == round(1.76 * 1.76 / 1.45, 2)
     assert est["exterieur"] == round(0.92 * 0.92 / 1.15, 2)
+
+
+# ---------------------------------------------------------------------------
+# Noms d'équipe (normalisation commune, rapprochements)
+# ---------------------------------------------------------------------------
+def test_team_name_normalisation():
+    assert normalize_team_name("1. FC Köln") == "koln"
+    assert normalize_team_name("Real Betis Balompié") == "real betis"
+    assert normalize_team_name("TSG 1899 Hoffenheim") == normalize_team_name("TSG Hoffenheim") == "hoffenheim"
+    assert normalize_team_name("FK Bodø/Glimt") == "fk bodo glimt"
+    assert normalize_team_name(None) == ""
+
+
+def test_psg_not_confused_with_paris_fc_whatever_the_order():
+    teams = [{"id": 1, "name": "Paris Saint-Germain FC", "shortName": "PSG", "tla": "PSG"},
+             {"id": 2, "name": "Paris FC", "shortName": "Paris FC", "tla": "PFC"}]
+    for order in (teams, teams[::-1]):
+        assert build_team_map(["Paris Saint Germain", "Paris FC"], order) == {"Paris Saint Germain": 1, "Paris FC": 2}
+
+
+def test_odds_names_with_aliases():
+    rennes, nantes = {"name": "Stade Rennais FC 1901", "shortName": "Stade Rennais"}, {"name": "FC Nantes", "shortName": "Nantes"}
+    assert team_similarity("Rennes", rennes) == 1.0 > team_similarity("Rennes", nantes)
+    inter = {"name": "FC Internazionale Milano", "shortName": "Inter"}
+    milan = {"name": "AC Milan", "shortName": "Milan"}
+    assert team_similarity("Inter Milan", inter) > team_similarity("Inter Milan", milan)
+
+
+def test_competitions_default_to_all_free_tier(monkeypatch):
+    from ingest import COMPETITION_META, configured_codes
+    monkeypatch.delenv("COMPETITIONS", raising=False)
+    assert configured_codes() == list(COMPETITION_META) and len(configured_codes()) == 12
+    monkeypatch.setenv("COMPETITIONS", "pl, CL ,XYZ")
+    assert configured_codes() == ["PL", "CL"]

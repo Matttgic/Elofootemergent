@@ -15,7 +15,7 @@ import {
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Legend,
 } from "recharts";
 
-function TeamPanel({ team, side }) {
+function TeamPanel({ team, side, code }) {
   if (!team) {
     return <div className="card-surface rounded-xl p-5"><DataUnavailable label="Analyse indisponible" /></div>;
   }
@@ -31,7 +31,8 @@ function TeamPanel({ team, side }) {
         {team.logo ? <img src={team.logo} alt="" className="w-12 h-12 object-contain" />
           : <div className="w-12 h-12 rounded bg-slate-800" />}
         <div className="min-w-0">
-          <Link to={team.classement ? "#" : "#"} className="font-head font-bold text-lg text-slate-50 truncate block">
+          <Link to={`/equipe/${code}/${team.team_id}`} data-testid={`team-link-${side}`}
+            className="font-head font-bold text-lg text-slate-50 truncate block hover:text-emerald-400">
             {team.nom}
           </Link>
           <div className="flex items-center gap-2 mt-1">
@@ -204,8 +205,8 @@ export default function MatchDetail() {
 
       {/* Score panels */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <TeamPanel team={home} side="home" />
-        <TeamPanel team={away} side="away" />
+        <TeamPanel team={home} side="home" code={m.competition?.code} />
+        <TeamPanel team={away} side="away" code={m.competition?.code} />
       </div>
 
       {/* Radar + avantages */}

@@ -84,7 +84,7 @@ export default function Leaderboards() {
       <>
         {posteFilter}
         <p className="text-xs text-slate-500 mb-3">
-          Classés par {cfg.note} · min. {data.min_minutes} min jouées · 5 grands championnats · source Understat.
+          Classés par {cfg.note} · min. {data.min_minutes} min jouées · 5 grands championnats (Understat) + Portugal et Pays-Bas (FotMob).
         </p>
         <div className="space-y-2" data-testid={`players-leaderboard-${key}`}>
           {data.joueurs.map((p, i) => (

@@ -4,13 +4,14 @@ Pondération décroissante (matchs les plus récents = poids le plus fort),
 cohérente avec la notation des équipes. Aucune donnée n'est inventée.
 """
 from scoring import clamp, _norm_weights, _wavg
-from player_ingest import _norm, _i, _f
+from player_ingest import _i, _f
+from teamnames import normalize_team_name
 
 RECENT_N = 6  # nombre de derniers matchs pris en compte
 
 
 def _same(a, b):
-    na, nb = _norm(a), _norm(b)
+    na, nb = normalize_team_name(a), normalize_team_name(b)
     return bool(na) and (na == nb or na in nb or nb in na)
 
 

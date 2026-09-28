@@ -1,19 +1,10 @@
 """Backend API regression tests for FootPulse Analytics."""
-import os
 import pytest
 import requests
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/') or 'http://localhost:8001'
-# use the public URL from frontend .env
-try:
-    with open('/app/frontend/.env') as f:
-        for line in f:
-            if line.startswith('REACT_APP_BACKEND_URL='):
-                BASE_URL = line.split('=', 1)[1].strip().rstrip('/')
-except Exception:
-    pass
+from backend_url import API
 
-API = f"{BASE_URL}/api"
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(scope="module")

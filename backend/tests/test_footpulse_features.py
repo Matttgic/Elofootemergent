@@ -1,9 +1,10 @@
 """Backend tests for FootPulse iteration 9: scores_frequents, FotMob player leagues DED/PPL, recalibrated scoring."""
-import os
 import pytest
 import requests
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://match-insights-173.preview.emergentagent.com').rstrip('/')
+from backend_url import BASE_URL
+
+pytestmark = pytest.mark.integration
 TIMEOUT = 60
 
 

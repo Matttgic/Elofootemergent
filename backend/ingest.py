@@ -37,8 +37,10 @@ def is_cup(code):
 
 
 def configured_codes():
-    raw = os.environ.get("COMPETITIONS", "PL,PD,SA,BL1,FL1,PPL,DED")
-    return [c.strip().upper() for c in raw.split(",") if c.strip() in COMPETITION_META]
+    """Compétitions synchronisées : variable COMPETITIONS (codes séparés par des
+    virgules), sinon toutes celles de l'offre gratuite football-data.org."""
+    raw = os.environ.get("COMPETITIONS") or ",".join(COMPETITION_META)
+    return [c.strip().upper() for c in raw.split(",") if c.strip().upper() in COMPETITION_META]
 
 
 def _match_doc(item, code, now):
@@ -110,21 +112,8 @@ async def run_ingest(db):
                 logger.error("Echec matchs %s: %s", code, e)
                 continue
             for item in data.get("matches", []):
-                ft = (item.get("score") or {}).get("fullTime") or {}
-                udate = item.get("utcDate")
-                doc = {
-                    "match_id": item["id"],
-                    "competition_code": code,
-                    "utc_date": udate,
-                    "match_date": paris_date(udate) if udate else None,
-                    "status": item.get("status"),
-                    "matchday": item.get("matchday"),
-                    "home_team": item.get("homeTeam"),
-                    "away_team": item.get("awayTeam"),
-                    "score": item.get("score"),
-                    "last_synced_at": now.isoformat(),
-                }
-                await db.matches.update_one({"match_id": item["id"]}, {"$set": doc}, upsert=True)
+                await db.matches.update_one({"match_id": item["id"]},
+                                            {"$set": _match_doc(item, code, now)}, upsert=True)
                 stats["matchs"] += 1
 
             try:

@@ -1,18 +1,11 @@
 """Iteration 8: confiance, calibration, Poisson 1N2+scores, H2H, repos,
 fiche joueur, filtre poste. Regression on core endpoints."""
-import os
 import pytest
 import requests
 
-BASE_URL = ''
-try:
-    with open('/app/frontend/.env') as f:
-        for line in f:
-            if line.startswith('REACT_APP_BACKEND_URL='):
-                BASE_URL = line.split('=', 1)[1].strip().rstrip('/')
-except Exception:
-    pass
-API = f"{BASE_URL}/api"
+from backend_url import API
+
+pytestmark = pytest.mark.integration
 
 BIG_FAV_MATCH = 560542  # Arsenal vs Coventry
 
@@ -146,7 +139,7 @@ def test_stats_endpoint(s):
     d = r.json()
     assert d["disponible"] is True
     tranches = [b["tranche"] for b in d["par_ecart_note"]]
-    assert tranches == ["0–5", "5–10", "10–15", "15–20", "20–25", "25–30", "30+"]
+    assert tranches == ["0–5", "5–10", "10–15", "15–20", "20–25", "25–30", "30–35", "35–40", "40–45", "45–50", "50+"]
 
 
 def test_leaderboard_teams(s):

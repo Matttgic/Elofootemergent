@@ -1,7 +1,5 @@
 """Ingestion des joueurs Understat + rapprochement des équipes avec football-data."""
 import logging
-import re
-import unicodedata
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
@@ -9,32 +7,22 @@ from pymongo import ReplaceOne
 
 from understat_client import fetch_players, UNDERSTAT_LEAGUES
 from fotmob_client import fetch_league_players, FOTMOB_LEAGUES, fotmob_poste
+from teamnames import normalize_team_name
 
 logger = logging.getLogger(__name__)
 
-_STOP = {"fc", "cf", "ac", "as", "sc", "ss", "rc", "cd", "sv", "vfl", "vfb", "tsg", "sd",
-         "club", "de", "the", "calcio", "balompie", "ud", "afc", "bc", "us", "1899", "04",
-         "05", "09", "1913", "1846", "1904", "1907", "1900", "hsv"}
 
-
-def _norm(s):
-    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()
-    s = re.sub(r"[^a-z0-9 ]", " ", s.lower())
-    toks = [t for t in s.split() if t and t not in _STOP]
-    return " ".join(toks)
-
-
-# Rares cas où le rapprochement flou échoue (nom trop différent d'une source à l'autre)
+# Rares cas où le rapprochement flou échoue (nom trop différent d'une source à l'autre).
+# Pas d'alias « Paris » pour le PSG : il capterait aussi Paris FC (Ligue 1 depuis 2025).
 ALIASES = {
     "FC Cologne": "Koln",
-    "Paris Saint Germain": "Paris",
     "Wolverhampton Wanderers": "Wolverhampton",
     "Athletic Club": "Athletic Bilbao",
 }
 
 
 def _sim(a, b):
-    na, nb = _norm(a), _norm(b)
+    na, nb = normalize_team_name(a), normalize_team_name(b)
     if not na or not nb:
         return 0.0
     if na == nb:
