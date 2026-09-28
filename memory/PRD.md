@@ -77,3 +77,12 @@ Voir Next Action Items du récap de finish.
 ### 2026-09-23 — Tranches d'écart étendues + repère rapide dans les matchs du jour
 - [x] Stats : ajout des tranches 30–35, 35–40, 40–45, 45–50 et 50+ (l'ancienne « 30+ » est remplacée). Tendance monotone confirmée (favori 44% → 92% de victoires selon l'écart)
 - [x] Repère rapide sur chaque carte de match (accueil) : écart de notes + favori + barre tricolore (favori/nul/surprise) avec %, via /api/matches -> item.calibration (helper _calibration réutilisant la calibration descriptive). Vérifié desktop + mobile
+
+### 2026-09-28 — Correctifs calibration, paris et robustesse
+- [x] /stats sans fuite de données : chaque match terminé est comparé aux notes AVANT-match (matchs antérieurs uniquement, classement reconstitué, ≥ 3 matchs par équipe) — scoring.pre_match_ratings. Sur une ligue aléatoire, le « favori » passait de 55 % V / 19 % D (biaisé) à 37 % / 37 %. Impacte le repère rapide, le badge VALUE et la probabilité du modèle des paris
+- [x] Appariement cotes The Odds API ↔ matchs : coup d'envoi à ± 36 h + meilleure similarité domicile+extérieur (fin des confusions Man Utd/Man City, Real Madrid/Real Sociedad, derby retour) — betting.match_fixture
+- [x] Kelly : quart de Kelly plafonné à 5 % de la bankroll courante, gains réinvestis, jamais plus que la bankroll engagée sur un même créneau — betting.simulate
+- [x] Paris versionnés (modele=2) : les paris figés avant ce correctif sont exclus du bilan (compteur paris_anciens_exclus) et remplacés s'ils sont encore à venir
+- [x] POST /api/players/form : ids validés (liste, format Understat/FotMob) et appels externes uniquement pour des joueurs connus en base
+- [x] Classements joueurs : plus de boucle de requêtes infinie en cas d'erreur API
+- [x] Tests unitaires hors ligne : backend/tests/test_unit_models.py (11 tests)

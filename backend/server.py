@@ -10,8 +10,9 @@ import logging
 from pathlib import Path
 from datetime import datetime, timezone
 
-from scoring import analyze_team, scoring_config, paris_date
+from scoring import analyze_team, scoring_config, paris_date, pre_match_ratings, MIN_HISTORY
 from signals import build_signals, head_to_head, h2h_insight
+from betting import MODELE_PARIS, match_fixture, kelly_fraction, simulate
 from player_scoring import analyze_player, player_scoring_config
 from player_form import compute_recent_form, compute_fotmob_form
 from understat_client import UNDERSTAT_LEAGUES, fetch_player_matches
@@ -76,47 +77,10 @@ async def run_light_guarded():
 # ---------------------------------------------------------------------------
 # Simulation de paris (cotes réelles The Odds API — stratégies Favori & Value)
 # ---------------------------------------------------------------------------
-import difflib
-import unicodedata
-
-
-def _tn(name):
-    if not name:
-        return ""
-    s = unicodedata.normalize("NFKD", str(name).lower())
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    drop = {"fc", "cf", "ac", "sc", "as", "rc", "sv", "cd", "ud", "afc", "1", "calcio",
-            "club", "de", "sad", "ss", "us", "bk", "if", "sk", "the"}
-    toks = [t for t in "".join(c if c.isalnum() else " " for c in s).split() if t not in drop]
-    return " ".join(toks)
-
-
-def _team_eq(odds_name, fd_team):
-    a = _tn(odds_name)
-    cands = [_tn(fd_team.get("name")), _tn(fd_team.get("shortName")), _tn(fd_team.get("tla"))]
-    for b in cands:
-        if not a or not b:
-            continue
-        if a == b or a in b or b in a:
-            return True
-        if difflib.SequenceMatcher(None, a, b).ratio() >= 0.72:
-            return True
-        if set(a.split()) & set(b.split()):
-            return True
-    return False
-
-
-def _match_fixture(fx, matches):
-    for m in matches:
-        ht, at = m.get("home_team") or {}, m.get("away_team") or {}
-        if _team_eq(fx["home_team"], ht) and _team_eq(fx["away_team"], at):
-            return m
-    return None
-
-
 async def snapshot_bets():
     """Fige un pari (cote favori + écart de notes) pour chaque match à venir dont
-    on obtient les vraies cotes. Idempotent (un pari par match)."""
+    on obtient les vraies cotes. Idempotent (un pari par match) ; un pari figé
+    avec un ancien modèle et encore en attente est remplacé."""
     if not os.environ.get("ODDS_API_KEY"):
         return {"ok": False, "raison": "cle_absente"}
     sd = await stats_analytics(None)
@@ -134,11 +98,12 @@ async def snapshot_bets():
         for fx in fixtures:
             if not (fx.get("home_odds") and fx.get("away_odds")):
                 continue
-            m = _match_fixture(fx, upcoming)
+            m = match_fixture(fx, upcoming)
             if not m:
                 continue
             mid = m["match_id"]
-            if await db.bets.find_one({"_id": mid}):
+            existing = await db.bets.find_one({"_id": mid}, {"modele": 1})
+            if existing and (existing.get("modele") or 0) >= MODELE_PARIS:
                 continue
             hid = (m.get("home_team") or {}).get("id")
             aid = (m.get("away_team") or {}).get("id")
@@ -156,17 +121,16 @@ async def snapshot_bets():
                 continue
             p = cal["favori_gagne_pct"] / 100.0
             implied = 1.0 / fav_odds
-            b = fav_odds - 1
-            kelly_f = max(0.0, min(1.0, (b * p - (1 - p)) / b)) if b > 0 else 0.0
-            await db.bets.insert_one({
-                "_id": mid, "competition_code": code, "ecart": cal["ecart"], "tranche": cal["tranche"],
+            await db.bets.replace_one({"_id": mid}, {
+                "_id": mid, "modele": MODELE_PARIS,
+                "competition_code": code, "ecart": cal["ecart"], "tranche": cal["tranche"],
                 "fav_side": fav_side, "fav_nom": cal["favori"], "fav_odds": round(fav_odds, 3),
                 "home_odds": fx["home_odds"], "draw_odds": fx["draw_odds"], "away_odds": fx["away_odds"],
                 "bookmaker": fx["bookmaker"], "model_prob": round(p, 4), "implied_prob": round(implied, 4),
-                "is_value": p > implied, "kelly_f": round(kelly_f, 4),
+                "is_value": p > implied, "kelly_f": round(kelly_fraction(p, fav_odds), 4),
                 "commence_time": fx["commence_time"],
                 "snapshot_at": datetime.now(timezone.utc).isoformat(), "status": "pending",
-            })
+            }, upsert=True)
             created += 1
     logger.info("Paris figés (snapshot) : %s nouveaux", created)
     return {"ok": True, "crees": created}
@@ -304,6 +268,10 @@ async def get_player_form(pid):
     """Forme récente d'un joueur, avec cache (18h) dans player_form.
     Understat pour les 5 grands championnats, FotMob pour Portugal/Pays-Bas."""
     from datetime import timedelta
+    # Joueurs connus uniquement : aucun appel externe pour un identifiant arbitraire.
+    pdoc = await db.players.find_one({"player_id": pid}, {"_id": 0, "team_title": 1})
+    if not pdoc:
+        return None
     is_fm = str(pid).startswith("fm")
     doc = await db.player_form.find_one({"_id": pid})
     if doc:
@@ -318,9 +286,6 @@ async def get_player_form(pid):
             recent = await fetch_player_recent(str(pid)[2:])
             data = compute_fotmob_form(recent)
         else:
-            pdoc = await db.players.find_one({"player_id": pid}, {"_id": 0, "team_title": 1})
-            if not pdoc:
-                return doc.get("data") if doc else None
             matches = await fetch_player_matches(pid)
             data = compute_recent_form(matches, pdoc.get("team_title"))
     except Exception as e:  # noqa: BLE001
@@ -604,11 +569,15 @@ async def player(player_id: str):
 @api_router.post("/players/form")
 async def players_form(payload: dict):
     ids = payload.get("ids") or []
+    if not isinstance(ids, list):
+        raise HTTPException(422, "« ids » doit être une liste d'identifiants de joueurs")
+    # Understat : identifiant numérique ; FotMob : « fm » + numérique
+    valid = list(dict.fromkeys(str(p) for p in ids if re.fullmatch(r"(fm)?\d{1,12}", str(p))))
     out = {}
-    for pid in ids[:12]:
-        data = await get_player_form(str(pid))
+    for pid in valid[:12]:
+        data = await get_player_form(pid)
         if data:
-            out[str(pid)] = data
+            out[pid] = data
     return out
 
 
@@ -661,7 +630,8 @@ _stats_cache = {}  # code -> (timestamp, data), TTL 10 min
 @api_router.get("/stats")
 async def stats_analytics(code: str | None = None):
     """Statistiques descriptives : lien entre l'écart de notes et le résultat réel.
-    Fondé sur les matchs terminés et les notes actuelles des équipes."""
+    Chaque match terminé est comparé aux notes que les équipes avaient AVANT son
+    coup d'envoi (matchs antérieurs uniquement), jamais aux notes actuelles."""
     from datetime import timedelta
     ck = code or "ALL"
     cached = _stats_cache.get(ck)
@@ -674,26 +644,24 @@ async def stats_analytics(code: str | None = None):
     buckets = {b[2]: {"note_sup": 0, "nul": 0, "note_inf": 0} for b in STAT_BUCKETS}
     scores_par_ecart = {b[2]: {} for b in STAT_BUCKETS}
     total = 0
+    home_total = 0
 
     for c in codes:
-        all_m, pos_map, rows, meta = await _load_comp(c)
-        ratings = {}
-        for tid in meta:
-            a = _analyze(all_m, pos_map, rows, meta, tid)
-            if a and a.get("global"):
-                ratings[tid] = a["global"]["score"]
+        all_m = await db.matches.find({"competition_code": c}, {"_id": 0}).to_list(2000)
+        ratings = pre_match_ratings(all_m)   # {match_id: (note_dom, note_ext)} avant-match
         for m in all_m:
             if m.get("status") != "FINISHED":
                 continue
             ft = (m.get("score") or {}).get("fullTime") or {}
             gh, ga = ft.get("home"), ft.get("away")
-            hid = (m.get("home_team") or {}).get("id")
-            aid = (m.get("away_team") or {}).get("id")
-            if gh is None or ga is None or hid not in ratings or aid not in ratings:
+            if gh is None or ga is None:
+                continue
+            home_total += 1
+            home_out["V" if gh > ga else ("N" if gh == ga else "D")] += 1
+            if m.get("match_id") not in ratings:
                 continue
             total += 1
-            home_out["V" if gh > ga else ("N" if gh == ga else "D")] += 1
-            rh, raw = ratings[hid], ratings[aid]
+            rh, raw = ratings[m["match_id"]]
             if rh == raw:
                 continue
             diff = abs(rh - raw)
@@ -743,13 +711,14 @@ async def stats_analytics(code: str | None = None):
             "defaites_pct": pct(higher["D"], h_total),
         },
         "avantage_domicile": {
-            "domicile_pct": pct(home_out["V"], total),
-            "nul_pct": pct(home_out["N"], total),
-            "exterieur_pct": pct(home_out["D"], total),
+            "domicile_pct": pct(home_out["V"], home_total),
+            "nul_pct": pct(home_out["N"], home_total),
+            "exterieur_pct": pct(home_out["D"], home_total),
         },
         "par_ecart_note": par_ecart,
-        "note": "Statistiques descriptives fondées sur les matchs terminés et les notes actuelles "
-                "des équipes (5 grands championnats et autres ligues, hors coupes).",
+        "note": "Statistiques descriptives : chaque match terminé est comparé aux notes que les deux "
+                "équipes avaient avant le coup d'envoi (calculées uniquement sur les matchs antérieurs, "
+                f"au moins {MIN_HISTORY} chacune). Championnats uniquement, hors coupes.",
     }
     _stats_cache[ck] = (datetime.now(timezone.utc), result)
     return result
@@ -758,43 +727,31 @@ async def stats_analytics(code: str | None = None):
 @api_router.get("/bets/simulation")
 async def bets_simulation():
     """Simulation de paris sur cotes réelles : P&L par tranche d'écart et au total,
-    pour 2 stratégies (Favori, Value), chacune en mise fixe (1 u) et Kelly (bankroll 100 u)."""
-    bets = await db.bets.find({}, {"_id": 0}).to_list(5000)
+    pour 2 stratégies (Favori, Value), chacune en mise fixe (1 u) et ¼ Kelly plafonné
+    (bankroll 100 u, gains réinvestis). Seuls les paris du modèle courant comptent."""
+    bets = await db.bets.find({"modele": {"$gte": MODELE_PARIS}}, {"_id": 0}).to_list(5000)
+    anciens = await db.bets.count_documents({"modele": {"$not": {"$gte": MODELE_PARIS}}})
     settled = [b for b in bets if b.get("status") in ("won", "lost")]
     pending = [b for b in bets if b.get("status") == "pending"]
-
-    def calc(lst):
-        n = len(lst)
-        wins = sum(1 for b in lst if b["status"] == "won")
-        pnl_f = sum((b["fav_odds"] - 1) if b["status"] == "won" else -1 for b in lst)
-        staked_k = sum(b["kelly_f"] * 100 for b in lst)
-        pnl_k = sum((b["kelly_f"] * 100 * (b["fav_odds"] - 1)) if b["status"] == "won"
-                    else -(b["kelly_f"] * 100) for b in lst)
-        return {
-            "paris": n, "gagnes": wins,
-            "taux_reussite": round(wins / n * 100, 1) if n else 0,
-            "mise_fixe": {"mise_totale": round(n * 1.0, 2), "gain_net": round(pnl_f, 2),
-                          "roi": round(pnl_f / n * 100, 1) if n else 0, "bankroll": round(100 + pnl_f, 2)},
-            "kelly": {"mise_totale": round(staked_k, 2), "gain_net": round(pnl_k, 2),
-                      "roi": round(pnl_k / staked_k * 100, 1) if staked_k > 0 else 0,
-                      "bankroll": round(100 + pnl_k, 2)},
-        }
 
     def agg(subset):
         by = {}
         for b in subset:
             by.setdefault(b["tranche"], []).append(b)
-        par = [{"tranche": lbl, **calc(by[lbl])} for _, _, lbl in STAT_BUCKETS if lbl in by]
-        return {"total": calc(subset), "par_ecart": par}
+        par = [{"tranche": lbl, **simulate(by[lbl])} for _, _, lbl in STAT_BUCKETS if lbl in by]
+        return {"total": simulate(subset), "par_ecart": par}
 
     return {
         "disponible": len(settled) > 0,
         "bankroll_initiale": 100,
         "en_attente": len(pending),
+        "paris_anciens_exclus": anciens,
         "regles": "Pari sur l'équipe la mieux notée (1N2), aux vraies cotes du bookmaker "
                   "(France en priorité, sinon bet365/pinnacle). Le P&L se construit au fil des "
-                  "matchs joués. Value = pari placé seulement quand la probabilité du modèle "
-                  "dépasse la probabilité implicite de la cote.",
+                  "matchs joués. Probabilité du modèle = % de victoire du favori observé avant-match "
+                  "dans la même tranche d'écart. Value = pari placé seulement quand cette probabilité "
+                  "dépasse la probabilité implicite de la cote. Kelly = quart de Kelly, plafonné à 5 % "
+                  "de la bankroll courante.",
         "strategies": {"favori": agg(settled),
                        "value": agg([b for b in settled if b.get("is_value")])},
     }
