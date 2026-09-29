@@ -7,6 +7,7 @@ services:
     name: footpulse-api
     runtime: python
     plan: free
+    region: frankfurt   # même région que le cluster MongoDB Atlas (latence API <-> base)
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
