@@ -49,7 +49,7 @@ export default function Search() {
           {res?.joueurs?.disponible ? (
             <div className="space-y-2" data-testid="search-players">
               {res.joueurs.resultats.map((p) => (
-                <div key={p.player_id} data-testid={`search-player-${p.player_id}`}
+                <Link key={p.player_id} to={`/joueur/${p.player_id}`} data-testid={`search-player-${p.player_id}`}
                   className="card-surface rounded-xl p-3 flex items-center gap-3">
                   {p.team_logo ? <TeamLogo src={p.team_logo} className="w-9 h-9" /> : <div className="w-9 h-9 rounded bg-slate-800 shrink-0" />}
                   <div className="min-w-0 flex-1">
@@ -57,7 +57,7 @@ export default function Search() {
                     <div className="text-xs text-slate-500">{p.poste} · {p.team_title} · {p.competition_nom}</div>
                   </div>
                   <span className="font-stat font-bold text-emerald-400">{p.score}</span>
-                </div>
+                </Link>
               ))}
             </div>
           ) : (

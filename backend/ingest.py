@@ -10,6 +10,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import httpx
+from pymongo import UpdateOne
 
 from football_client import FootballDataClient, get_token
 from player_ingest import ingest_players, ingest_fotmob_players
@@ -83,13 +84,10 @@ async def run_light_ingest(db):
     count = 0
     try:
         payload = await client.matches_window(start, end)
-        for item in payload.get("matches", []):
-            code = (item.get("competition") or {}).get("code")
-            if code not in allowed:
-                continue
-            await db.matches.update_one({"match_id": item["id"]},
-                                        {"$set": _match_doc(item, code, now)}, upsert=True)
-            count += 1
+        docs = [_match_doc(item, (item.get("competition") or {}).get("code"), now)
+                for item in payload.get("matches", [])
+                if (item.get("competition") or {}).get("code") in allowed]
+        count = await _upsert_matches(db.matches, docs)
         await db.meta.update_one(
             {"_id": "sync"},
             {"$set": {"_id": "sync", "last_sync": now.isoformat(), "mode": "leger", "matchs_maj": count}},
@@ -102,6 +100,15 @@ async def run_light_ingest(db):
         return {"ok": False, "raison": str(e)}
     finally:
         await client.close()
+
+
+async def _upsert_matches(collection, docs):
+    """Upsert groupé (un aller-retour pour tout le lot au lieu d'un par match :
+    la synchro tourne loin de la base). Retourne le nombre de matchs écrits."""
+    if docs:
+        await collection.bulk_write([UpdateOne({"match_id": d["match_id"]}, {"$set": d}, upsert=True)
+                                     for d in docs], ordered=False)
+    return len(docs)
 
 
 def _season_year(payload):
@@ -139,12 +146,8 @@ async def ingest_history(db, client, code, current_season, now=None):
             await db.meta.update_one({"_id": "history"}, {"$set": {f"saisons.{key}": {
                 "statut": "refuse", "http": code_http, "at": now.isoformat()}}}, upsert=True)
             continue
-        n = 0
-        for item in payload.get("matches", []):
-            doc = _match_doc(item, code, now)
-            doc["season"] = season
-            await db.matches_history.update_one({"match_id": item["id"]}, {"$set": doc}, upsert=True)
-            n += 1
+        docs = [{**_match_doc(item, code, now), "season": season} for item in payload.get("matches", [])]
+        n = await _upsert_matches(db.matches_history, docs)
         await db.meta.update_one({"_id": "history"}, {"$set": {f"saisons.{key}": {
             "statut": "ok", "matchs": n, "at": now.isoformat()}}}, upsert=True)
         loaded += n
@@ -167,10 +170,8 @@ async def run_ingest(db):
             except Exception as e:  # noqa: BLE001
                 logger.error("Echec matchs %s: %s", code, e)
                 continue
-            for item in data.get("matches", []):
-                await db.matches.update_one({"match_id": item["id"]},
-                                            {"$set": _match_doc(item, code, now)}, upsert=True)
-                stats["matchs"] += 1
+            stats["matchs"] += await _upsert_matches(
+                db.matches, [_match_doc(item, code, now) for item in data.get("matches", [])])
             try:
                 stats["historique"] += await ingest_history(db, client, code, _season_year(data), now)
             except Exception as e:  # noqa: BLE001
