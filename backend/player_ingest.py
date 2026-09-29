@@ -18,6 +18,7 @@ ALIASES = {
     "FC Cologne": "Koln",
     "Wolverhampton Wanderers": "Wolverhampton",
     "Athletic Club": "Athletic Bilbao",
+    "Rennes": "Stade Rennais",       # « rennes » ressemble davantage à « lens »
 }
 
 
@@ -35,22 +36,26 @@ def _sim(a, b):
 
 
 def build_team_map(understat_titles, fd_teams):
-    """Associe chaque titre d'équipe Understat à un team_id football-data."""
-    mapping, unmatched = {}, []
+    """Associe chaque titre d'équipe Understat à un team_id football-data, une équipe
+    au plus par titre : les couples sont attribués du plus ressemblant au moins
+    ressemblant, pour qu'un nom proche (« Rennes » / « Lens ») ne capte pas une
+    équipe déjà mieux rapprochée ni ne laisse l'autre sans correspondance."""
+    scores = []
     for title in understat_titles:
-        candidates = [title]
-        if title in ALIASES:
-            candidates.append(ALIASES[title])
-        best_id, best_score = None, 0.0
+        candidates = [title] + ([ALIASES[title]] if title in ALIASES else [])
         for t in fd_teams:
-            for name in (t.get("name"), t.get("shortName"), t.get("tla")):
-                sc = max(_sim(cand, name) for cand in candidates)
-                if sc > best_score:
-                    best_score, best_id = sc, t.get("id")
-        if best_id is not None and best_score >= 0.5:
-            mapping[title] = best_id
-        else:
-            unmatched.append(title)
+            if t.get("id") is None:
+                continue
+            sc = max(_sim(cand, name) for cand in candidates
+                     for name in (t.get("name"), t.get("shortName"), t.get("tla")))
+            if sc >= 0.5:
+                scores.append((sc, title, t["id"]))
+    mapping, used = {}, set()
+    for sc, title, tid in sorted(scores, key=lambda x: -x[0]):
+        if title not in mapping and tid not in used:
+            mapping[title] = tid
+            used.add(tid)
+    unmatched = [t for t in understat_titles if t not in mapping]
     if unmatched:
         logger.info("Understat équipes non rapprochées: %s", unmatched)
     return mapping

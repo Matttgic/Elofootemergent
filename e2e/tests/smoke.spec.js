@@ -42,9 +42,12 @@ test("fiche match puis fiche équipe : Elo, cotes et courbe d'évolution", async
   await grid.locator("a").first().click();
   await expect(page.getByTestId("prediction-panel")).toBeVisible();
   await expect(page.getByTestId("elo-note")).toContainText("Elo");
+  await expect(page.getByTestId("xg-note")).toContainText("Forme xG");   // modèle Elo + xG
+  await expect(page.getByTestId("prediction-panel")).toContainText("Modèle Elo + xG");
   await expect(page.getByTestId("detail-odds")).toBeVisible();
   await page.getByTestId("team-link-home").click();
   await expect(page.getByTestId("team-elo")).toContainText("Elo");
+  await expect(page.getByTestId("team-xg")).toContainText("forme xG");
   await expect(page.getByTestId("team-elo-chart").locator(".recharts-line path").first()).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -81,7 +84,9 @@ test("stats : qualité du modèle, avertissement et paris suivis", async ({ page
 test("méthodologie et recherche", async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto("/methodologie");
-  await expect(page.getByTestId("methodo-backtest").locator("tbody tr")).toHaveCount(5);
+  await expect(page.getByTestId("methodo-backtest").locator("table").first().locator("tbody tr")).toHaveCount(5);
+  await expect(page.getByTestId("methodo-backtest-xg").locator("tbody tr")).toHaveCount(4);
+  await expect(page.getByTestId("methodo-xg")).toContainText("xG");
   await page.goto("/recherche?q=man");
   await expect(page.getByTestId("search-teams")).toContainText("Manchester City");
   // un joueur trouvé mène à sa fiche

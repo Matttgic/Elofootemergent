@@ -168,7 +168,8 @@ function ModelQuality({ q }) {
       </div>
       <p className="text-xs text-slate-500 mb-4">
         {q.matchs} matchs, probabilités calculées avant chaque coup d'envoi
-        {q.hors_echantillon ? " avec un modèle ajusté sur les saisons précédentes uniquement" : ""}. Log-loss et Brier : plus c'est bas, mieux c'est.
+        {q.hors_echantillon ? " avec un modèle ajusté sur les saisons précédentes uniquement" : ""}
+        {q.avec_xg_pct ? `, dont ${Math.round(q.avec_xg_pct)} % avec la forme xG` : ""}. Log-loss et Brier : plus c'est bas, mieux c'est.
       </p>
       <div className="grid grid-cols-3 gap-3 mb-4 text-center">
         {[["Log-loss", "log_loss"], ["Brier", "brier"], ["Réussite", "reussite_pct"]].map(([label, k]) => (

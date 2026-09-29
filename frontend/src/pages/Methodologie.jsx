@@ -67,6 +67,7 @@ export default function Methodologie() {
                 <div className="space-y-2">
                   <p className="text-sm text-slate-300 leading-relaxed">{c.elo.principe}</p>
                   <p className="text-sm text-slate-400 leading-relaxed">{c.elo.probabilites}</p>
+                  {c.elo.xg && <p className="text-sm text-slate-400 leading-relaxed" data-testid="methodo-xg">{c.elo.xg}</p>}
                 </div>
               </div>
             </div>
@@ -95,6 +96,31 @@ export default function Methodologie() {
                   ))}
                 </tbody>
               </table>
+              {c.elo.backtest.xg && (
+                <div className="mt-4" data-testid="methodo-backtest-xg">
+                  <p className="text-xs text-slate-500 mb-2">
+                    Apport des xG : {c.elo.backtest.xg.matchs.toLocaleString("fr-FR")} matchs ({c.elo.backtest.xg.championnats}).
+                  </p>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-[10px] uppercase text-slate-500 text-left border-b border-slate-800">
+                        <th className="py-1.5 pr-2">Méthode</th>
+                        <th className="py-1.5 px-2 text-right">Log-loss</th>
+                        <th className="py-1.5 pl-2 text-right">Brier</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {c.elo.backtest.xg.log_loss.map((r) => (
+                        <tr key={r.modele} className={`border-b border-slate-800/60 ${r.modele.includes("(site)") ? "text-cyan-300 font-semibold" : "text-slate-300"}`}>
+                          <td className="py-1.5 pr-2">{r.modele}</td>
+                          <td className="py-1.5 px-2 text-right font-stat">{r.valeur.toFixed(3)}</td>
+                          <td className="py-1.5 pl-2 text-right font-stat">{r.brier.toFixed(3)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               <div className="mt-4 rounded-lg bg-amber-500/5 border border-amber-500/30 p-3 flex items-start gap-2.5">
                 <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                 <div className="text-xs text-slate-300 space-y-1">

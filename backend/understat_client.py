@@ -39,6 +39,17 @@ async def fetch_players(league_key: str, season: int):
     return data.get("players", [])
 
 
+async def fetch_league_matches(league_key: str, season: int):
+    """Matchs joués d'une saison avec leurs xG (1 appel par championnat et par saison).
+    Chaque élément : {"datetime", "h": {"title"}, "a": {"title"}, "goals", "xG"}."""
+    url = f"{BASE}/getLeagueData/{league_key}/{season}"
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.get(url, headers={**HEADERS, "Referer": f"{BASE}/league/{league_key}/{season}"})
+        r.raise_for_status()
+        data = r.json()
+    return [d for d in data.get("dates", []) if d.get("isResult") and d.get("xG")]
+
+
 async def fetch_player_matches(player_id: str):
     """Journal match par match d'un joueur (toutes saisons, du plus récent au plus ancien)."""
     url = f"{BASE}/main/getPlayerMatches/{player_id}"

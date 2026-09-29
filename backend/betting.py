@@ -9,9 +9,10 @@ from itertools import groupby
 from teamnames import normalize_team_name
 
 # Version du modèle de paris. v2 : calibration chronologique et appariement strict ;
-# v3 : probabilités du modèle Elo. Les paris figés avec une version antérieure sont
-# exclus du bilan et remplacés s'ils sont encore à venir.
-MODELE_PARIS = 3
+# v3 : probabilités du modèle Elo ; v4 : Elo + forme xG (5 grands championnats).
+# Les paris figés avec une version antérieure sont exclus du bilan et remplacés
+# s'ils sont encore à venir.
+MODELE_PARIS = 4
 
 VALUE_EDGE = 0.05         # avantage minimal (espérance de gain) pour signaler une « value »
 

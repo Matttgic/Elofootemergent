@@ -8,16 +8,22 @@ championnats européens, puis compare, saison par saison et sans regarder l'aven
   - les cotes des bookmakers (Bet365 avant-match, moyenne et Pinnacle à la clôture) ;
 et simule des stratégies de paris aux cotes Bet365.
 
-    cd backend && python -m tools.backtest_historique [--k 20] [--home-adv 60]
+    cd backend && python -m tools.backtest_historique [--k 20] [--home-adv 60] [--xg]
 
 Réseau requis ; ne tourne pas dans la CI. Résultats de référence (septembre 2026,
 13 273 matchs de 2021-22 à 2026-27) : log-loss Elo 0,990 ; fréquences 1,073 ;
 Bet365 0,971 ; Pinnacle clôture 0,967. Aucune stratégie n'est rentable face aux
 cotes réelles (favori du modèle −4,6 %, « value » de −8,8 % à −13,9 %).
+
+--xg : rattache aussi les xG Understat des 5 grands championnats et compare, sur
+ces championnats, l'Elo seul et le modèle Elo + forme xG du site (référence :
+7 800 matchs, log-loss 0,992 → 0,983 ; Pinnacle 0,968).
 """
 import argparse
 import csv
+import gzip
 import io
+import json
 import math
 import os
 import sys
@@ -73,6 +79,41 @@ def load():
     return rows
 
 
+US_LEAGUES = {"E0": "EPL", "SP1": "La_liga", "I1": "Serie_A", "D1": "Bundesliga", "F1": "Ligue_1"}
+US_URL = "https://understat.com/getLeagueData/{league}/{year}"
+
+
+def _understat(league, year):
+    path = CACHE / f"understat_{league}_{year}.json"
+    if not path.exists():
+        req = urllib.request.Request(US_URL.format(league=league, year=year), headers={
+            "X-Requested-With": "XMLHttpRequest", "User-Agent": "Mozilla/5.0",
+            "Referer": f"https://understat.com/league/{league}/{year}"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            raw = r.read()
+        CACHE.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw)
+    return [d for d in json.loads(path.read_text())["dates"] if d.get("isResult")]
+
+
+def attach_xg(rows):
+    """Ajoute m["xg"] aux matchs des 5 grands championnats (mêmes règles que la synchro)."""
+    from xg_ingest import attach_xg_ops
+    by_key = {}
+    for m in rows:
+        if m["competition_code"] in US_LEAGUES:
+            m["home_team"]["name"], m["away_team"]["name"] = m["home_team"]["id"], m["away_team"]["id"]
+            by_key.setdefault((m["competition_code"], m["season"]), []).append(m)
+    by_id = {m["match_id"]: m for m in rows}
+    linked = total = 0
+    for (league, season), ms in by_key.items():
+        ops, _ = attach_xg_ops(_understat(US_LEAGUES[league], 2000 + int(season[:2])), ms)
+        for op in ops:
+            by_id[op._filter["match_id"]]["xg"] = op._doc["$set"]["xg"]
+        linked, total = linked + len(ops), total + len(ms)
+    return linked, total
+
+
 def outcome(m):
     ft = m["score"]["fullTime"]
     return 0 if ft["home"] > ft["away"] else (1 if ft["home"] == ft["away"] else 2)   # index dans (dom, nul, ext)
@@ -97,10 +138,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--k", type=float, default=elo.K)
     ap.add_argument("--home-adv", type=float, default=elo.HOME_ADV)
+    ap.add_argument("--xg", action="store_true", help="comparer aussi le modèle Elo + forme xG")
     args = ap.parse_args()
 
     rows = load()
     pre = elo.run_elo(rows, k=args.k, home_adv=args.home_adv)["pre"]
+    if args.xg:
+        backtest_xg(rows, pre, args.home_adv)
+        return
     preds = {"Fréquences dom/nul/ext": [], "Elo (site)": [], "Bet365 avant-match": [],
              "Moyenne clôture": [], "Pinnacle clôture": []}
     bets = []
@@ -145,6 +190,30 @@ def main():
             i = max(range(3), key=lambda j: ev[j])
             return i if ev[i] >= edge else None
         run(f"Value (avantage ≥ {edge * 100:.0f} %)", value)
+
+
+def backtest_xg(rows, pre, home_adv):
+    linked, total = attach_xg(rows)
+    print(f"xG rattachés : {linked} / {total} matchs des 5 grands championnats")
+    xgf = elo.xg_form(rows)
+    preds = {"Elo seul": [], "Elo + forme xG (site)": [], "Pinnacle clôture": []}
+    for season in TEST:
+        train = [m for m in rows if SEASONS[0] < m["season"] < season]
+        c1 = elo.fit_outcome_model(train, pre, home_adv=home_adv)
+        c2 = elo.fit_outcome_model_xg(train, pre, xgf, home_adv=home_adv)
+        for m in rows:
+            if (m["season"] != season or m["competition_code"] not in US_LEAGUES or not m["ps_close"]
+                    or pre[m["match_id"]][2] < elo.BURN_IN):
+                continue
+            rh, ra, _ = pre[m["match_id"]]
+            d = elo.xg_diff(*xgf["pre"][m["match_id"]])
+            p1 = list(elo.outcome_probs(rh - ra, c1, home_adv=home_adv))
+            p2 = list(elo.outcome_probs(rh - ra, c2, home_adv=home_adv, xg_diff=d)) if d is not None else p1
+            for name, probs in (("Elo seul", p1), ("Elo + forme xG (site)", p2), ("Pinnacle clôture", book(m["ps_close"]))):
+                preds[name].append((probs, outcome(m)))
+    print(f"5 grands championnats — saisons {TEST[0]} à {TEST[-1]}")
+    for name, pairs in preds.items():
+        print(f"  {name:24} {scores(pairs)}")
 
 
 if __name__ == "__main__":

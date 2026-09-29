@@ -109,90 +109,107 @@ def _sig(z):
     return e / (1 + e)
 
 
-def outcome_probs(diff, coefs=None, home_adv=HOME_ADV):
+def outcome_probs(diff, coefs=None, home_adv=HOME_ADV, xg_diff=None):
     """Probabilités (domicile, nul, extérieur) pour un écart Elo dom - ext (hors
-    avantage du terrain, ajouté ici)."""
+    avantage du terrain, ajouté ici) et, si le modèle en tient compte, l'écart de
+    forme xG entre les deux équipes."""
     c = coefs or DEFAULT_LOGIT
     x = (diff + home_adv) / 100
-    p_away = _sig(c["theta_away"] - c["beta"] * x)
-    p_not_home = _sig(c["theta_draw"] - c["beta"] * x)
+    eta = c["beta"] * x
+    if xg_diff is not None and "beta_xg" in c:
+        eta += c["beta_xg"] * xg_diff
+    p_away = _sig(c["theta_away"] - eta)
+    p_not_home = _sig(c["theta_draw"] - eta)
     return 1 - p_not_home, p_not_home - p_away, p_away
 
 
-def _loglik(params, data):
-    beta, t0, t1 = params
+def _unpack(params, k):
+    return params[:k], params[k], params[k + 1]
+
+
+def _loglik(params, data, k):
+    beta, t0, t1 = _unpack(params, k)
     if t1 <= t0:
         return -math.inf
     ll = 0.0
     for (x, y), w in data:
-        s0, s1 = _sig(t0 - beta * x), _sig(t1 - beta * x)
+        eta = sum(b * v for b, v in zip(beta, x))
+        s0, s1 = _sig(t0 - eta), _sig(t1 - eta)
         p = s0 if y == 0 else (s1 - s0 if y == 1 else 1 - s1)
         ll += w * math.log(max(p, 1e-12))
     return ll
 
 
-def _grad(params, data):
-    beta, t0, t1 = params
-    gb = g0 = g1 = 0.0
+def _grad(params, data, k):
+    beta, t0, t1 = _unpack(params, k)
+    gb, g0, g1 = [0.0] * k, 0.0, 0.0
     for (x, y), w in data:
-        s0, s1 = _sig(t0 - beta * x), _sig(t1 - beta * x)
+        eta = sum(b * v for b, v in zip(beta, x))
+        s0, s1 = _sig(t0 - eta), _sig(t1 - eta)
         d0, d1 = s0 * (1 - s0), s1 * (1 - s1)
         if y == 0:
             g0 += w * (1 - s0)
-            gb -= w * x * (1 - s0)
+            coef = -(1 - s0)
         elif y == 2:
             g1 -= w * s1
-            gb += w * x * s1
+            coef = s1
         else:
             den = max(s1 - s0, 1e-12)
             g0 -= w * d0 / den
             g1 += w * d1 / den
-            gb -= w * x * (d1 - d0) / den
-    return [gb, g0, g1]
+            coef = -(d1 - d0) / den
+        for j in range(k):
+            gb[j] += w * x[j] * coef
+    return gb + [g0, g1]
 
 
-def _solve3(a, b):
-    """Résout le système linéaire 3×3 a·x = b (pivot de Gauss)."""
+def _solve(a, b):
+    """Résout le système linéaire a·x = b (pivot de Gauss) ; None si singulier."""
+    n = len(b)
     m = [row[:] + [v] for row, v in zip(a, b)]
-    for i in range(3):
-        p = max(range(i, 3), key=lambda r: abs(m[r][i]))
+    for i in range(n):
+        p = max(range(i, n), key=lambda r: abs(m[r][i]))
         m[i], m[p] = m[p], m[i]
         if abs(m[i][i]) < 1e-12:
             return None
-        for r in range(3):
+        for r in range(n):
             if r != i:
                 f = m[r][i] / m[i][i]
                 m[r] = [vr - f * vi for vr, vi in zip(m[r], m[i])]
-    return [m[i][3] / m[i][i] for i in range(3)]
+    return [m[i][n] / m[i][i] for i in range(n)]
 
 
 def fit_ordered_logit(xs, ys, iters=30):
     """Maximum de vraisemblance (Newton, hessienne par différences finies).
-    xs : écarts Elo /100 (avantage du terrain compris) ; ys : 0 ext, 1 nul, 2 dom.
-    Les écarts sont regroupés au point Elo près (calcul rapide, même optimum)."""
+    xs : écarts Elo /100 (avantage du terrain compris), ou tuples (écart Elo /100,
+    écart de forme xG) ; ys : 0 ext, 1 nul, 2 dom. Les valeurs sont regroupées au
+    centième près (calcul rapide, même optimum)."""
+    rows = [x if isinstance(x, (tuple, list)) else (x,) for x in xs]
+    k = len(rows[0]) if rows else 1
     counts = {}
-    for x, y in zip(xs, ys):
-        key = (round(x, 2), y)
+    for x, y in zip(rows, ys):
+        key = (tuple(round(v, 2) for v in x), y)
         counts[key] = counts.get(key, 0) + 1
     data = list(counts.items())
-    params = [DEFAULT_LOGIT["beta"], DEFAULT_LOGIT["theta_away"], DEFAULT_LOGIT["theta_draw"]]
-    ll = _loglik(params, data)
+    params = [DEFAULT_LOGIT["beta"]] + [0.0] * (k - 1) + [DEFAULT_LOGIT["theta_away"], DEFAULT_LOGIT["theta_draw"]]
+    n = k + 2
+    ll = _loglik(params, data, k)
     for _ in range(iters):
-        g = _grad(params, data)
+        g = _grad(params, data, k)
         h, eps = [], 1e-4
-        for j in range(3):
+        for j in range(n):
             up, dn = params[:], params[:]
             up[j] += eps
             dn[j] -= eps
-            gu, gd = _grad(up, data), _grad(dn, data)
+            gu, gd = _grad(up, data, k), _grad(dn, data, k)
             h.append([(a - b) / (2 * eps) for a, b in zip(gu, gd)])
-        step = _solve3([[h[r][c] for r in range(3)] for c in range(3)], [-v for v in g])
+        step = _solve([[h[r][c] for r in range(n)] for c in range(n)], [-v for v in g])
         if step is None:
             break
         t = 1.0
         while t > 1e-4:
             cand = [p + t * s for p, s in zip(params, step)]
-            cll = _loglik(cand, data)
+            cll = _loglik(cand, data, k)
             if cll >= ll:
                 break
             t /= 2
@@ -202,7 +219,10 @@ def fit_ordered_logit(xs, ys, iters=30):
         params, ll = cand, cll
         if converged:
             break
-    return {"beta": params[0], "theta_away": params[1], "theta_draw": params[2]}
+    out = {"beta": params[0], "theta_away": params[k], "theta_draw": params[k + 1]}
+    if k == 2:
+        out["beta_xg"] = params[1]
+    return out
 
 
 def training_set(matches, pre, home_adv=HOME_ADV, burn_in=BURN_IN):
@@ -226,6 +246,75 @@ def fit_outcome_model(matches, pre, home_adv=HOME_ADV):
     return dict(fit_ordered_logit(xs, ys), echantillon=len(xs), ajuste=True)
 
 
+# ---------------------------------------------------------------------------
+# Forme xG (Understat, 5 grands championnats) : 2e variable du modèle 1N2
+# ---------------------------------------------------------------------------
+XG_HALF_LIFE = 15        # demi-vie, en matchs, de la moyenne des écarts d'xG
+XG_MIN_MATCHES = 3       # matchs avec xG requis pour chaque équipe
+# Coefficients Elo + xG par défaut (ajustés sur 12 700 matchs des 5 grands championnats)
+DEFAULT_LOGIT_XG = {"beta": 0.13, "beta_xg": 0.80, "theta_away": -0.83, "theta_draw": 0.40}
+
+
+def _xg(m):
+    xg = m.get("xg") or {}
+    h, a = xg.get("home"), xg.get("away")
+    return (h, a) if h is not None and a is not None else None
+
+
+def xg_form(matches, half_life=XG_HALF_LIFE):
+    """Écart d'xG récent de chaque équipe (xG pour − xG contre, moyenne à décroissance
+    exponentielle : un match compte moitié moins `half_life` matchs plus tard), AVANT
+    chaque match terminé, et sa valeur actuelle. Seuls les matchs avec xG comptent.
+    Retourne {"pre": {match_id: (forme_dom, n_dom, forme_ext, n_ext)},
+              "teams": {team_id: (forme, n)}} (n = nombre de matchs avec xG)."""
+    decay = 0.5 ** (1 / half_life)
+    state, pre = {}, {}
+
+    def value(s):
+        return s[0] / s[1] if s[1] else 0.0
+
+    for m in sorted(filter(_finished, matches), key=lambda m: m["utc_date"]):
+        hid, aid = m["home_team"]["id"], m["away_team"]["id"]
+        sh = state.setdefault(hid, [0.0, 0.0, 0])
+        sa = state.setdefault(aid, [0.0, 0.0, 0])
+        pre[m["match_id"]] = (value(sh), sh[2], value(sa), sa[2])
+        xg = _xg(m)
+        if not xg:
+            continue
+        diff = xg[0] - xg[1]
+        for s, sign in ((sh, 1), (sa, -1)):
+            s[0] = decay * s[0] + sign * diff
+            s[1] = decay * s[1] + 1
+            s[2] += 1
+    return {"pre": pre, "teams": {t: (value(s), s[2]) for t, s in state.items()}}
+
+
+def xg_diff(form_dom, n_dom, form_ext, n_ext, min_matches=XG_MIN_MATCHES):
+    """Écart de forme xG dom − ext, ou None si l'une des équipes a trop peu de matchs avec xG."""
+    if n_dom < min_matches or n_ext < min_matches:
+        return None
+    return form_dom - form_ext
+
+
+def fit_outcome_model_xg(matches, pre, xgf, home_adv=HOME_ADV, burn_in=BURN_IN):
+    """Coefficients du modèle Elo + xG, ajustés sur les matchs où les deux équipes
+    ont une forme xG (valeurs par défaut si l'échantillon est trop petit)."""
+    xs, ys = [], []
+    for m in matches:
+        p, f = pre.get(m.get("match_id")), xgf["pre"].get(m.get("match_id"))
+        if not p or not f or p[2] < burn_in or not _finished(m):
+            continue
+        d = xg_diff(*f)
+        if d is None:
+            continue
+        ft = m["score"]["fullTime"]
+        xs.append(((p[0] - p[1] + home_adv) / 100, d))
+        ys.append(2 if ft["home"] > ft["away"] else (1 if ft["home"] == ft["away"] else 0))
+    if len(xs) < MIN_FIT_MATCHES:
+        return dict(DEFAULT_LOGIT_XG, echantillon=len(xs), ajuste=False)
+    return dict(fit_ordered_logit(xs, ys), echantillon=len(xs), ajuste=True)
+
+
 # Backtest de référence (tools/backtest_historique.py) : 13 273 matchs de 8 championnats,
 # saisons 2021-22 à 2026-27, coefficients ajustés sans regarder l'avenir.
 BACKTEST = {
@@ -243,6 +332,17 @@ BACKTEST = {
         {"strategie": "Favori du modèle, cotes Bet365", "roi": -4.6},
         {"strategie": "« Value » (avantage ≥ 5 %), cotes Bet365", "roi": -10.0},
     ],
+    # Apport des xG Understat, 5 grands championnats (7 800 matchs, mêmes saisons)
+    "xg": {
+        "matchs": 7800,
+        "championnats": "Premier League, Liga, Serie A, Bundesliga, Ligue 1",
+        "log_loss": [
+            {"modele": "Elo seul", "valeur": 0.992, "brier": 0.592},
+            {"modele": "Elo + tirs cadrés récents", "valeur": 0.987, "brier": 0.589},
+            {"modele": "Elo + forme xG (site)", "valeur": 0.983, "brier": 0.586},
+            {"modele": "Pinnacle à la clôture", "valeur": 0.968, "brier": 0.576},
+        ],
+    },
 }
 
 
@@ -258,6 +358,12 @@ def elo_config():
                         "ajusté sur les matchs passés : pour un écart Elo donné, il reproduit la fréquence "
                         "observée de chaque issue. Les scores probables suivent une loi de Poisson dont la "
                         "répartition des buts est alignée sur ces probabilités.",
+        "xg": "Dans les 5 grands championnats, le modèle ajoute la forme xG de chaque équipe : "
+              "la différence entre les expected goals (xG, qualité des occasions, source Understat) "
+              f"créés et concédés, moyennée sur ses derniers matchs (demi-vie de {XG_HALF_LIFE} matchs). "
+              "Les xG mesurent la domination mieux que le score, souvent décidé par peu d'occasions. "
+              f"Il faut au moins {XG_MIN_MATCHES} matchs avec xG pour chaque équipe ; sinon, ou hors "
+              "de ces championnats, seul l'Elo est utilisé.",
         "value": "Une « value » signale une issue dont la probabilité estimée dépasse d'au moins 5 % celle "
                  "qu'implique la cote du bookmaker. Sur l'historique, ces écarts n'ont pas été rentables : "
                  "les bookmakers restent plus précis que le modèle.",
