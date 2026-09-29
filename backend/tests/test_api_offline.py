@@ -94,6 +94,13 @@ def dataset():
                             "status": "FINISHED", "home_team": team(h), "away_team": team(a),
                             "score": {"fullTime": {"home": min(6, int(rng.expovariate(1 / strength[h]))),
                                                    "away": min(6, int(rng.expovariate(1 / strength[a])))}}})
+    # équipe de la saison précédente absente cette saison (reléguée hors des championnats suivis)
+    gone = {"id": 21, "name": "Ipswich Town FC", "shortName": "Ipswich Town", "tla": "IPS",
+            "crest": "https://crests.example/21.png"}
+    kick = NOW.replace(hour=15) - timedelta(days=200)
+    history.append({"match_id": 59999, "competition_code": "PL", "season": NOW.year - 1, "utc_date": iso(kick),
+                    "match_date": kick.date().isoformat(), "matchday": 20, "status": "FINISHED",
+                    "home_team": gone, "away_team": team(1), "score": {"fullTime": {"home": 0, "away": 2}}})
     return matches, table, players, form, bets, history
 
 
@@ -180,6 +187,7 @@ def test_team_and_leaderboards(api):
     t = api.get("/api/team/PL/1").json()
     assert t["team_id"] == 1 and 0 <= t["global"]["score"] <= 100 and len(t["historique"]) == 8
     assert t["elo"]["championnat"] == "PL" and 1 <= t["elo"]["rang"] <= 20
+    assert t["elo"]["sur"] == 20      # l'équipe reléguée hors des championnats suivis n'est pas classée
     assert len(t["elo_historique"]) == t["elo"]["matchs"] and round(t["elo_historique"][-1]["elo"]) == t["elo"]["elo"]
     assert api.get("/api/team/PL/424242").status_code == 404
     tous = api.get("/api/leaderboard/teams").json()
