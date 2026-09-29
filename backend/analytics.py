@@ -225,7 +225,7 @@ def prediction(eld, m, home_name, away_name):
     ph, pn, pa = outcome_probs(rh - ra, eld.coefs)
     fav_home = ph >= pa
     return {
-        "elo_domicile": round(rh), "elo_exterieur": round(ra),
+        "elo_domicile": round(rh), "elo_exterieur": round(ra), "avantage_terrain": round(HOME_ADV),
         "ecart": round(abs(rh + HOME_ADV - ra)),
         "domicile_pct": round(ph * 100, 1), "nul_pct": round(pn * 100, 1), "exterieur_pct": round(pa * 100, 1),
         "favori": home_name if fav_home else away_name,

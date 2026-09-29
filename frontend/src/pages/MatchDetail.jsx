@@ -203,10 +203,13 @@ export default function MatchDetail() {
           </div>
           {d.prediction && (
             <div className="mt-3 pt-3 border-t border-slate-800 text-xs text-slate-400" data-testid="elo-note">
-              Elo : <b className="text-slate-200">{m.home_team?.shortName || "Dom."} {d.prediction.elo_domicile}</b> ·{" "}
-              <b className="text-slate-200">{m.away_team?.shortName || "Ext."} {d.prediction.elo_exterieur}</b> — écart de{" "}
-              <b className="text-slate-200">{d.prediction.ecart} pts</b> avantage du terrain compris, en faveur de{" "}
-              <b className="text-emerald-400">{d.prediction.favori}</b>.
+              Elo : <b className="text-slate-200">{m.home_team?.shortName || "Dom."} {d.prediction.elo_domicile}</b>
+              {d.prediction.avantage_terrain ? <> + {d.prediction.avantage_terrain} à domicile = <b className="text-slate-200">
+                {d.prediction.elo_domicile + d.prediction.avantage_terrain}</b></> : null}
+              {" "}contre <b className="text-slate-200">{m.away_team?.shortName || "Ext."} {d.prediction.elo_exterieur}</b>
+              {" "}→ <b className="text-emerald-400">{d.prediction.favori}</b> favori de{" "}
+              <b className="text-slate-200">{d.prediction.ecart} pts</b>
+              {d.prediction.favori_pct < 45 ? " (match très ouvert)" : ""}.
             </div>
           )}
           {d.cotes && (
