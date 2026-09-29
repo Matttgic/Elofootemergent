@@ -1,12 +1,15 @@
 """Ingestion quotidienne depuis football-data.org vers MongoDB.
 
 Récupère, par championnat : tous les matchs de la saison (historique + à venir)
-et le classement. Upsert idempotent (aucun doublon). Ne récupère aucune donnée
-individuelle de joueur (non fournie par la source gratuite).
+et le classement ; une seule fois, les deux saisons précédentes (Elo). Upsert
+idempotent (aucun doublon). Les statistiques de joueurs viennent d'autres
+sources (player_ingest).
 """
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+
+import httpx
 
 from football_client import FootballDataClient, get_token
 from player_ingest import ingest_players, ingest_fotmob_players
@@ -41,6 +44,12 @@ def configured_codes():
     virgules), sinon toutes celles de l'offre gratuite football-data.org."""
     raw = os.environ.get("COMPETITIONS") or ",".join(COMPETITION_META)
     return [c.strip().upper() for c in raw.split(",") if c.strip().upper() in COMPETITION_META]
+
+
+# Saisons précédentes chargées une seule fois (résultats figés) pour l'Elo et les
+# confrontations directes. Refus éventuel de l'offre gratuite : nouvel essai après 7 jours.
+HISTORY_SEASONS = 2
+HISTORY_RETRY = timedelta(days=7)
 
 
 def _match_doc(item, code, now):
@@ -95,6 +104,53 @@ async def run_light_ingest(db):
         await client.close()
 
 
+def _season_year(payload):
+    """Année de début de la saison renvoyée par football-data (ex. 2026 pour 2026-27)."""
+    raw = (payload.get("filters") or {}).get("season")
+    if raw and str(raw).isdigit():
+        return int(raw)
+    for item in payload.get("matches", []):
+        start = (item.get("season") or {}).get("startDate")
+        if start:
+            return int(start[:4])
+    return None
+
+
+async def ingest_history(db, client, code, current_season, now=None):
+    """Charge dans `matches_history` les HISTORY_SEASONS saisons précédant la saison en
+    cours (une seule fois : elles ne changent plus). Sélections nationales ignorées."""
+    if not current_season or code in ("EC", "WC"):
+        return 0
+    now = now or datetime.now(timezone.utc)
+    done = ((await db.meta.find_one({"_id": "history"})) or {}).get("saisons", {})
+    loaded = 0
+    for season in range(current_season - 1, current_season - 1 - HISTORY_SEASONS, -1):
+        key = f"{code}-{season}"
+        state = done.get(key) or {}
+        if state.get("statut") == "ok":
+            continue
+        if state.get("at") and now - datetime.fromisoformat(state["at"]) < HISTORY_RETRY:
+            continue
+        try:
+            payload = await client.competition_matches(code, season)
+        except httpx.HTTPStatusError as e:
+            code_http = e.response.status_code
+            logger.warning("Historique %s refusé (HTTP %s)", key, code_http)
+            await db.meta.update_one({"_id": "history"}, {"$set": {f"saisons.{key}": {
+                "statut": "refuse", "http": code_http, "at": now.isoformat()}}}, upsert=True)
+            continue
+        n = 0
+        for item in payload.get("matches", []):
+            doc = _match_doc(item, code, now)
+            doc["season"] = season
+            await db.matches_history.update_one({"match_id": item["id"]}, {"$set": doc}, upsert=True)
+            n += 1
+        await db.meta.update_one({"_id": "history"}, {"$set": {f"saisons.{key}": {
+            "statut": "ok", "matchs": n, "at": now.isoformat()}}}, upsert=True)
+        loaded += n
+    return loaded
+
+
 async def run_ingest(db):
     token = get_token()
     if not token:
@@ -103,7 +159,7 @@ async def run_ingest(db):
 
     client = FootballDataClient(token)
     now = datetime.now(timezone.utc)
-    stats = {"matchs": 0, "championnats": 0}
+    stats = {"matchs": 0, "championnats": 0, "historique": 0}
     try:
         for code in configured_codes():
             try:
@@ -115,6 +171,10 @@ async def run_ingest(db):
                 await db.matches.update_one({"match_id": item["id"]},
                                             {"$set": _match_doc(item, code, now)}, upsert=True)
                 stats["matchs"] += 1
+            try:
+                stats["historique"] += await ingest_history(db, client, code, _season_year(data), now)
+            except Exception as e:  # noqa: BLE001
+                logger.error("Echec historique %s: %s", code, e)
 
             try:
                 if is_cup(code):

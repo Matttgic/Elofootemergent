@@ -66,12 +66,31 @@ def _poisson_probs(mh, ma, maxg=8):
             "scores": scores}
 
 
+def _align_split(total, target_diff, maxg=8):
+    """Répartit `total` buts attendus entre domicile et extérieur pour que la loi de
+    Poisson donne le même écart P(domicile) − P(extérieur) que le modèle Elo.
+    Le total (donc plus/moins de 2.5 buts) est inchangé. Bissection : cet écart
+    croît avec la part du domicile."""
+    lo, hi = 0.05, max(0.1, total - 0.05)
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        P = _poisson_probs(mid, total - mid, maxg)
+        if P["domicile"] - P["exterieur"] < target_diff:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
 def _statut_prob(p, fav=0.55, neutre=0.45):
     return "Favorable" if p >= fav else ("Neutre" if p >= neutre else "Défavorable")
 
 
 def build_signals(matches, home_id, away_id, home_name, away_name,
-                  lg_home_avg=1.45, lg_away_avg=1.15):
+                  lg_home_avg=1.45, lg_away_avg=1.15, target_1x2=None):
+    """`target_1x2` : probabilités (domicile, nul, extérieur) du modèle Elo. Quand elles
+    sont fournies, ce sont elles qui sont affichées, et la répartition des buts
+    attendus est alignée dessus (scores probables, BTTS cohérents)."""
     home_all = extract_records(matches, home_id)
     away_all = extract_records(matches, away_id)
     home_at_home = extract_records(matches, home_id, "HOME")
@@ -97,7 +116,11 @@ def build_signals(matches, home_id, away_id, home_name, away_name,
     exp_home = min(3.5, max(0.15, h_scored * a_conceded / lg_home_avg))
     exp_away = min(3.5, max(0.15, a_scored * h_conceded / lg_away_avg))
     exp_total = exp_home + exp_away
+    if target_1x2:
+        exp_home = _align_split(exp_total, target_1x2[0] - target_1x2[2])
+        exp_away = exp_total - exp_home
     P = _poisson_probs(exp_home, exp_away)
+    p1x2 = target_1x2 or (P["domicile"], P["nul"], P["exterieur"])
 
     signals = []
 
@@ -172,9 +195,10 @@ def build_signals(matches, home_id, away_id, home_name, away_name,
         "disponible": True,
         "buts_estimes": {"total": round(exp_total, 2), "domicile": round(exp_home, 2), "exterieur": round(exp_away, 2)},
         "probabilites": {
-            "domicile_pct": round(P["domicile"] * 100),
-            "nul_pct": round(P["nul"] * 100),
-            "exterieur_pct": round(P["exterieur"] * 100),
+            "domicile_pct": round(p1x2[0] * 100),
+            "nul_pct": round(p1x2[1] * 100),
+            "exterieur_pct": round(p1x2[2] * 100),
+            "source": "Elo" if target_1x2 else "Poisson",
             "scores_probables": P["scores"],
         },
         "avertissement": "Signaux statistiques indicatifs — en aucun cas des prédictions certaines.",

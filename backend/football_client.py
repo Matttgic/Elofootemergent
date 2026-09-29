@@ -51,9 +51,9 @@ class FootballDataClient:
             return resp.json()
         raise RuntimeError(f"football-data request failed: {path}")
 
-    async def competition_matches(self, code: str):
-        """All matches of the current season for a league (history + upcoming)."""
-        return await self._get(f"/competitions/{code}/matches")
+    async def competition_matches(self, code: str, season: int | None = None):
+        """Tous les matchs d'une saison (en cours par défaut ; `season` = année de début)."""
+        return await self._get(f"/competitions/{code}/matches", {"season": season} if season else None)
 
     async def matches_window(self, date_from: str, date_to: str):
         """Tous les matchs (tous championnats) sur une fenêtre de dates — 1 appel."""

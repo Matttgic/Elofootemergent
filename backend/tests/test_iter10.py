@@ -1,4 +1,4 @@
-"""FootPulse iteration 10: calibration+value on /api/matches, FotMob forme_recente, Understat regression."""
+"""FootPulse iteration 10: probabilités Elo + value on /api/matches, FotMob forme_recente, Understat regression."""
 import os
 import asyncio
 from pathlib import Path
@@ -20,32 +20,29 @@ def s():
     return requests.Session()
 
 
-# ---------- /api/matches calibration + value ----------
-def test_matches_calibration_value(s):
+# ---------- /api/matches : probabilités Elo + cotes / value ----------
+def test_matches_prediction_and_value(s):
     r = s.get(f"{BASE_URL}/api/matches", params={"date": "2026-08-31"}, timeout=TIMEOUT)
     assert r.status_code == 200, r.text
     data = r.json()
     matchs = data.get("matchs") or []
     assert len(matchs) > 0, "No matches on 2026-08-31"
 
-    value_seen = False
+    seen = 0
     for m in matchs:
-        cal = m.get("calibration")
-        # calibration may be None if a side has no data; but at least most matches must have it
-        if cal is None:
+        pred = m.get("prediction")
+        # None si une équipe n'a encore aucun match noté
+        if pred is None:
             continue
-        for k in ("ecart", "favori", "favori_gagne_pct", "nul_pct", "outsider_gagne_pct",
-                 "echantillon", "score_frequent", "value"):
-            assert k in cal, f"Missing '{k}' in calibration: {cal}"
-        sf = cal["score_frequent"]
-        if sf is not None:
-            assert "score" in sf and "pct" in sf and "n" in sf
-            assert 0 <= sf["pct"] <= 100
-            assert sf["n"] >= 1
-        assert isinstance(cal["value"], bool)
-        if cal["value"]:
-            value_seen = True
-    assert value_seen, "No match with value=true found on 2026-08-31"
+        seen += 1
+        for k in ("elo_domicile", "elo_exterieur", "ecart", "domicile_pct", "nul_pct", "exterieur_pct",
+                  "favori", "favori_cote", "favori_pct", "matchs_min", "fiable"):
+            assert k in pred, f"Missing '{k}' in prediction: {pred}"
+        assert abs(pred["domicile_pct"] + pred["nul_pct"] + pred["exterieur_pct"] - 100) < 0.5
+        assert "cotes" in m and "value" in m
+        if m["value"]:
+            assert m["value"]["avantage_pct"] >= 5
+    assert seen > 0, "Aucune probabilité Elo sur 2026-08-31"
 
 
 # ---------- FotMob player forme_recente NOT null ----------

@@ -1,4 +1,4 @@
-"""Tests unitaires hors ligne (ni réseau ni base) : calibration avant-match,
+"""Tests unitaires hors ligne (ni réseau ni base) : Elo et probabilités 1N2,
 rapprochement cotes <-> matchs et mises Kelly."""
 import math
 import random
@@ -9,10 +9,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from betting import (KELLY_CAP, kelly_fraction, match_fixture, settle_outcome,  # noqa: E402
-                     simulate, team_similarity)
+                     simulate, team_similarity, value_pick)
+from elo import (DEFAULT_LOGIT, fit_ordered_logit, fit_outcome_model, margin_multiplier,  # noqa: E402
+                 outcome_probs, run_elo)
 from player_ingest import build_team_map  # noqa: E402
-from scoring import compute_defensif, compute_offensif, pre_match_ratings, standings_positions  # noqa: E402
-from signals import build_signals  # noqa: E402
+from scoring import compute_defensif, compute_offensif  # noqa: E402
+from signals import _align_split, _poisson_probs, build_signals  # noqa: E402
 from teamnames import normalize_team_name  # noqa: E402
 
 
@@ -48,41 +50,52 @@ def _random_league(seed, n_teams=18, rounds=8):
 
 
 # ---------------------------------------------------------------------------
-# Calibration avant-match (pas de fuite de données)
+# Elo et probabilités 1N2 (pas de fuite de données)
 # ---------------------------------------------------------------------------
-def test_pre_match_rating_ignores_the_match_itself_and_later_ones():
+def test_elo_pre_ratings_ignore_the_match_itself_and_later_ones():
     matches = _random_league(seed=1)
-    ratings = pre_match_ratings(matches)
-    target = next(m for m in matches if m["match_id"] in ratings and m["utc_date"] < "2026-08-08")
+    pre = run_elo(matches)["pre"]
+    target = next(m for m in matches if "2026-08-04" < m["utc_date"] < "2026-08-06")
 
     altered = [dict(m) for m in matches]
     for m in altered:
         if m["match_id"] == target["match_id"] or m["utc_date"] > target["utc_date"]:
             m["score"] = {"fullTime": {"home": 9, "away": 0}}
-    assert pre_match_ratings(altered)[target["match_id"]] == ratings[target["match_id"]]
+    assert run_elo(altered)["pre"][target["match_id"]] == pre[target["match_id"]]
 
 
-def test_pre_match_ratings_require_min_history():
-    matches = _random_league(seed=2)
-    ratings = pre_match_ratings(matches, min_history=3)
-    rated_dates = {m["utc_date"] for m in matches if m["match_id"] in ratings}
-    # 3 journées complètes nécessaires avant la première note
-    assert min(rated_dates) == "2026-08-04T15:00:00Z"
+def test_elo_is_zero_sum_and_counts_home_advantage():
+    r = run_elo([_match(1, "2026-08-01T15:00:00Z", 1, 2, 1, 1)])
+    # nul à domicile entre équipes égales : le domicile (favori) perd des points
+    assert r["ratings"][1] < 1500 < r["ratings"][2]
+    assert r["ratings"][1] + r["ratings"][2] == 3000
+    assert r["pre"][1] == (1500, 1500, 0) and r["played"] == {1: 1, 2: 1}
+    assert margin_multiplier(1) == 1 and margin_multiplier(2) == 1.5 and margin_multiplier(-4) == 15 / 8
 
 
-def test_random_league_favourite_not_inflated():
-    """Sur des résultats purement aléatoires, l'équipe « mieux notée » ne doit pas
-    gagner nettement plus qu'elle ne perd (l'ancienne méthode donnait ~55 % / 19 %)."""
+def test_newcomer_starts_among_the_weakest_of_its_league():
+    matches = _random_league(seed=3)
+    for m in matches:
+        m["competition_code"] = "PL"
+    late = _match(999, "2026-09-01T15:00:00Z", 77, 1, 0, 0)
+    late["competition_code"] = "PL"
+    r = run_elo(matches + [late])
+    pool = sorted(r["pre"][m["match_id"]][0] for m in matches if m["utc_date"] >= "2026-08-08")
+    assert r["pre"][999][0] < sorted(r["ratings"][t] for t in range(1, 19))[9]
+    assert pool and r["pre"][999][0] != 1500
+
+
+def test_random_league_elo_favourite_not_inflated():
+    """Sur des résultats purement aléatoires, l'équipe au meilleur Elo ne doit pas
+    gagner nettement plus qu'elle ne perd (pas de fuite du résultat dans la note)."""
     v = d = 0
     for seed in range(60):
         matches = _random_league(seed)
-        ratings = pre_match_ratings(matches)
+        pre = run_elo(matches)["pre"]
         for m in matches:
-            if m["match_id"] not in ratings:
-                continue
-            rh, ra = ratings[m["match_id"]]
+            rh, ra, n = pre[m["match_id"]]
             gh, ga = m["score"]["fullTime"]["home"], m["score"]["fullTime"]["away"]
-            if rh == ra or gh == ga:
+            if n < 3 or rh == ra or gh == ga:
                 continue
             if (gh > ga) == (rh > ra):
                 v += 1
@@ -91,10 +104,51 @@ def test_random_league_favourite_not_inflated():
     assert abs(v - d) / (v + d) < 0.1, (v, d)
 
 
-def test_standings_ties_share_average_rank():
-    pos = standings_positions({1: (6, 3, 4), 2: (3, 0, 2), 3: (3, 0, 2), 4: (0, -3, 0)})
-    assert pos == {1: (1, 4), 2: (2.5, 4), 3: (2.5, 4), 4: (4, 4)}
-    assert set(standings_positions({1: (0, 0, 0), 2: (0, 0, 0)}).values()) == {(1.5, 2)}
+def test_ordered_logit_recovers_known_coefficients():
+    rng = random.Random(5)
+    true = {"beta": 0.7, "theta_away": -0.5, "theta_draw": 0.6}
+    xs, ys = [], []
+    for _ in range(6000):
+        x = rng.uniform(-3, 3)
+        u = rng.random()
+        p_away = 1 / (1 + math.exp(-(true["theta_away"] - true["beta"] * x)))
+        p_nh = 1 / (1 + math.exp(-(true["theta_draw"] - true["beta"] * x)))
+        xs.append(x)
+        ys.append(0 if u < p_away else (1 if u < p_nh else 2))
+    fit = fit_ordered_logit(xs, ys)
+    for k, v in true.items():
+        assert abs(fit[k] - v) < 0.08, (k, fit)
+
+
+def test_outcome_probabilities_sum_to_one_and_follow_the_gap():
+    probs = [outcome_probs(d) for d in (-300, -100, 0, 100, 300)]
+    for ph, pn, pa in probs:
+        assert abs(ph + pn + pa - 1) < 1e-9 and min(ph, pn, pa) > 0
+    homes = [p[0] for p in probs]
+    assert homes == sorted(homes) and probs[2][0] > probs[2][2]   # avantage du terrain à écart nul
+
+
+def test_fit_outcome_model_needs_enough_matches():
+    matches = _random_league(seed=4)
+    pre = run_elo(matches)["pre"]
+    model = fit_outcome_model(matches, pre)
+    assert model["ajuste"] is False and model["beta"] == DEFAULT_LOGIT["beta"]
+
+
+def test_goal_split_aligned_on_elo_keeps_total():
+    home = _align_split(2.6, 0.30)
+    P = _poisson_probs(home, 2.6 - home)
+    assert abs((P["domicile"] - P["exterieur"]) - 0.30) < 1e-3
+    # total inchangé : plus de 2.5 buts identique (aux troncatures de la grille près)
+    assert abs(P["over25"] - _poisson_probs(1.3, 1.3)["over25"]) < 1e-3
+
+
+def test_value_pick_needs_a_real_edge():
+    pred = {"domicile_pct": 50.0, "nul_pct": 25.0, "exterieur_pct": 25.0}
+    assert value_pick(pred, {"home_odds": 1.9, "draw_odds": 3.5, "away_odds": 4.0}) is None
+    v = value_pick(pred, {"home_odds": 2.3, "draw_odds": 3.5, "away_odds": 4.0})
+    assert v == {"issue": "domicile", "cote": 2.3, "proba_pct": 50.0, "avantage_pct": 15.0}
+    assert value_pick(None, {"home_odds": 2.3}) is None and value_pick(pred, None) is None
 
 
 # ---------------------------------------------------------------------------

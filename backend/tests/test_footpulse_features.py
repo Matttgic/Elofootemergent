@@ -19,7 +19,7 @@ def test_stats_scores_frequents_present(s):
     assert r.status_code == 200
     data = r.json()
     assert data.get("disponible") is True
-    buckets = data.get("par_ecart_note")
+    buckets = data.get("par_ecart_elo")
     assert isinstance(buckets, list) and len(buckets) > 0
     for b in buckets:
         if b.get("matchs", 0) > 0:

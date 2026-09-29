@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { Skeleton } from "../components/ui/skeleton";
-import { PieChart, TrendingUp, Home as HomeIcon, Scale, Coins, Clock } from "lucide-react";
+import { PieChart, TrendingUp, Home as HomeIcon, Scale, Coins, Clock, Target, AlertTriangle } from "lucide-react";
 
 function TriBar({ a, b, c, labels }) {
   const av = a ?? 0, bv = b ?? 0, cv = c ?? 0;
@@ -43,7 +43,15 @@ function BetSimulation({ sim }) {
         <Coins className="w-5 h-5 text-amber-400" />
         <h3 className="font-head font-bold text-slate-100">Simulation de paris</h3>
       </div>
-      <p className="text-xs text-slate-500 mb-4">{sim.regles}</p>
+      <p className="text-xs text-slate-500 mb-3">{sim.regles}</p>
+      <div className="rounded-lg bg-amber-500/5 border border-amber-500/30 p-3 mb-4 flex items-start gap-2.5 text-xs text-slate-300" data-testid="sim-backtest-warning">
+        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+        <span>
+          <b className="text-amber-300">Test sur l'historique :</b> sur 13 273 matchs de 8 championnats (2021 à 2026), parier le
+          favori du modèle aux cotes Bet365 aurait perdu <b>4,6 %</b> des mises, et les paris « value » de <b>8,8 à 13,9 %</b>.
+          Les bookmakers restent plus précis que le modèle : cette simulation mesure le modèle, ce n'est pas un conseil de pari.
+        </span>
+      </div>
 
       <div className="flex flex-wrap gap-2 mb-4">
         {["favori", "value"].map((k) => (
@@ -96,12 +104,12 @@ function BetSimulation({ sim }) {
             </div>
           </div>
 
-          <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-2">Détail par tranche d'écart</div>
+          <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-2">Détail par probabilité du favori (modèle)</div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[10px] uppercase text-slate-500 text-left border-b border-slate-800">
-                  <th className="py-1.5 pr-2">Écart</th>
+                  <th className="py-1.5 pr-2">Proba.</th>
                   <th className="py-1.5 px-2 text-right">Paris</th>
                   <th className="py-1.5 px-2 text-right">Réussite</th>
                   <th className="py-1.5 px-2 text-right">Gain net</th>
@@ -133,14 +141,64 @@ function BetSimulation({ sim }) {
       )}
       {sim.paris_anciens_exclus > 0 && (
         <p className="text-[11px] text-slate-500 mt-1" data-testid="sim-old-excluded">
-          {sim.paris_anciens_exclus} paris figés avec l'ancien modèle (probabilités biaisées) sont exclus du bilan.
+          {sim.paris_anciens_exclus} paris figés avec un ancien modèle sont exclus du bilan.
         </p>
       )}
     </div>
   );
 }
 
-function sTaux(s) { return s.total.mise_fixe.taux_reussite; }
+function ModelQuality({ q }) {
+  if (!q) return null;
+  const better = q.modele.log_loss < q.reference.log_loss;
+  return (
+    <div className="card-surface rounded-xl p-5 mb-4" data-testid="stat-model-quality">
+      <div className="flex items-center gap-2 mb-1">
+        <Target className="w-5 h-5 text-cyan-400" />
+        <h3 className="font-head font-bold text-slate-100">Qualité des probabilités (saison en cours)</h3>
+      </div>
+      <p className="text-xs text-slate-500 mb-4">
+        {q.matchs} matchs, probabilités calculées avant chaque coup d'envoi
+        {q.hors_echantillon ? " avec un modèle ajusté sur les saisons précédentes uniquement" : ""}. Log-loss et Brier : plus c'est bas, mieux c'est.
+      </p>
+      <div className="grid grid-cols-3 gap-3 mb-4 text-center">
+        {[["Log-loss", "log_loss"], ["Brier", "brier"], ["Réussite", "reussite_pct"]].map(([label, k]) => (
+          <div key={k} className="rounded-lg bg-slate-800/50 p-3" data-testid={`quality-${k}`}>
+            <div className="text-[10px] uppercase text-slate-500">{label}</div>
+            <div className="text-xl font-black font-stat text-cyan-400">{q.modele[k]}{k === "reussite_pct" ? "%" : ""}</div>
+            <div className="text-[11px] text-slate-500">référence {q.reference[k]}{k === "reussite_pct" ? "%" : ""}</div>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-slate-400 mb-3">
+        Référence = simples fréquences domicile / nul / extérieur. {better
+          ? "Le modèle Elo fait mieux que cette référence."
+          : "Le modèle ne fait pas mieux que cette référence sur cet échantillon."}
+      </p>
+      <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-2">Calibration : le favori gagne-t-il aussi souvent que prévu ?</div>
+      <table className="w-full text-sm" data-testid="quality-calibration">
+        <thead>
+          <tr className="text-[10px] uppercase text-slate-500 text-left border-b border-slate-800">
+            <th className="py-1.5 pr-2">Proba. du favori</th>
+            <th className="py-1.5 px-2 text-right">Matchs</th>
+            <th className="py-1.5 px-2 text-right">Prévu</th>
+            <th className="py-1.5 pl-2 text-right">Observé</th>
+          </tr>
+        </thead>
+        <tbody>
+          {q.calibration.filter((c) => c.matchs > 0).map((c) => (
+            <tr key={c.tranche} className="border-b border-slate-800/60">
+              <td className="py-1.5 pr-2 text-slate-300">{c.tranche}</td>
+              <td className="py-1.5 px-2 text-right font-stat text-slate-400">{c.matchs}</td>
+              <td className="py-1.5 px-2 text-right font-stat text-slate-300">{c.prevu_pct}%</td>
+              <td className="py-1.5 pl-2 text-right font-stat text-emerald-400">{c.observe_pct}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export default function Stats() {
   const [d, setD] = useState(null);
@@ -161,18 +219,19 @@ export default function Stats() {
         <PieChart className="w-7 h-7 text-emerald-400" /> Stats
       </h1>
       <p className="text-slate-400 text-sm mb-6">
-        Lien entre les notes des équipes et les résultats réels · échantillon de <b className="text-slate-200">{d.echantillon}</b> matchs terminés.
+        Lien entre les notes Elo et les résultats réels · <b className="text-slate-200">{d.echantillon}</b> matchs
+        {d.echantillon_saison ? <> dont <b className="text-slate-200">{d.echantillon_saison}</b> cette saison</> : null}.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
         <div className="card-surface rounded-xl p-5" data-testid="stat-higher-rated">
           <div className="flex items-center gap-2 mb-3">
             <TrendingUp className="w-5 h-5 text-emerald-400" />
-            <h3 className="font-head font-bold text-slate-100">Équipe la mieux notée</h3>
+            <h3 className="font-head font-bold text-slate-100">Favori selon l'Elo</h3>
           </div>
-          <div className="text-3xl font-black font-stat text-emerald-400 mb-1">{d.note_superieure.victoires_pct}%</div>
-          <p className="text-xs text-slate-500 mb-3">de victoires quand une équipe a une note supérieure</p>
-          <TriBar a={d.note_superieure.victoires_pct} b={d.note_superieure.nuls_pct} c={d.note_superieure.defaites_pct}
+          <div className="text-3xl font-black font-stat text-emerald-400 mb-1">{d.favori_elo.victoires_pct}%</div>
+          <p className="text-xs text-slate-500 mb-3">de victoires pour l'équipe au meilleur Elo (avantage du terrain compris)</p>
+          <TriBar a={d.favori_elo.victoires_pct} b={d.favori_elo.nuls_pct} c={d.favori_elo.defaites_pct}
             labels={["Gagne", "Nul", "Perd"]} />
         </div>
 
@@ -188,13 +247,15 @@ export default function Stats() {
         </div>
       </div>
 
+      <ModelQuality q={d.modele} />
+
       <div className="card-surface rounded-xl p-5" data-testid="stat-by-gap">
         <div className="flex items-center gap-2 mb-4">
           <Scale className="w-5 h-5 text-emerald-400" />
-          <h3 className="font-head font-bold text-slate-100">Résultat selon l'écart de notes</h3>
+          <h3 className="font-head font-bold text-slate-100">Résultat selon l'écart Elo</h3>
         </div>
         <div className="space-y-4">
-          {d.par_ecart_note.map((b) => (
+          {d.par_ecart_elo.map((b) => (
             <div key={b.tranche} data-testid={`stat-gap-${b.tranche}`}>
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-sm font-semibold text-slate-200">Écart {b.tranche} pts</span>
@@ -202,12 +263,12 @@ export default function Stats() {
               </div>
               {b.matchs > 0 ? (
                 <>
-                  <TriBar a={b.note_sup_gagne_pct} b={b.nul_pct} c={b.note_inf_gagne_pct}
-                    labels={["Note sup.", "Nul", "Note inf."]} />
+                  <TriBar a={b.favori_gagne_pct} b={b.nul_pct} c={b.outsider_gagne_pct}
+                    labels={["Favori", "Nul", "Outsider"]} />
                   {b.scores_frequents?.length > 0 && (
                     <div className="mt-2.5" data-testid={`stat-scores-${b.tranche}`}>
                       <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">
-                        Scores exacts fréquents <span className="text-slate-600">(vue équipe mieux notée)</span>
+                        Scores exacts fréquents <span className="text-slate-600">(vue du favori)</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         {b.scores_frequents.map((s) => (

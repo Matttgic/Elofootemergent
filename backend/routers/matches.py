@@ -5,8 +5,10 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
-from analytics import calibration, compact, comp_data, match_summary, stats_analytics, team_logos
+from analytics import compact, comp_data, elo_data, match_summary, prediction, team_logos
+from betting import odds_view, value_pick
 from core import db
+from elo import BURN_IN, elo_config
 from football_client import get_token
 from ingest import COMPETITION_META, configured_codes, is_cup
 from jobs import catch_up_if_stale, ingest_state
@@ -79,7 +81,10 @@ async def matches(code: str | None = None, date: str | None = None):
         by_code.setdefault(d["competition_code"], []).append(d)
 
     out = []
-    sd = await stats_analytics(None)
+    eld = await elo_data()
+    bets = {b["_id"]: b for b in await db.bets.find(
+        {"_id": {"$in": [d["match_id"] for d in docs]}},
+        {"home_odds": 1, "draw_odds": 1, "away_odds": 1, "bookmaker": 1}).to_list(500)}
     for c, ms in by_code.items():
         comp = await comp_data(c)
         for m in ms:
@@ -87,17 +92,25 @@ async def matches(code: str | None = None, date: str | None = None):
             item["competition"] = {"code": c, "nom": COMPETITION_META.get(c, {}).get("nom")}
             item["domicile"] = compact(comp.team((m.get("home_team") or {}).get("id")))
             item["exterieur"] = compact(comp.team((m.get("away_team") or {}).get("id")))
-            dom, ext = item["domicile"], item["exterieur"]
-            item["calibration"] = calibration(
-                sd,
-                dom["global"] if dom else None,
-                ext["global"] if ext else None,
-                dom["nom_court"] if dom else "Domicile",
-                ext["nom_court"] if ext else "Extérieur",
-            )
+            item["prediction"] = prediction(eld, m, _short(m, "home_team"), _short(m, "away_team"))
+            bet = bets.get(m["match_id"])
+            item["cotes"] = odds_view(bet)
+            item["value"] = value_pick(item["prediction"], bet)
             out.append(item)
     out.sort(key=lambda x: x.get("utc_date") or "")
     return {"date": target, "matchs": out}
+
+
+def _short(m, side):
+    t = m.get(side) or {}
+    return t.get("shortName") or t.get("name") or ("Domicile" if side == "home_team" else "Extérieur")
+
+
+def _with_elo(analysis, eld, team_id):
+    """Copie de l'analyse (partagée par le cache) complétée de l'Elo de l'équipe."""
+    if not analysis:
+        return None
+    return {**analysis, "elo": eld.team(team_id)}
 
 
 @router.get("/match/{match_id}")
@@ -107,11 +120,13 @@ async def match_detail(match_id: int):
         raise HTTPException(404, "Match introuvable")
     code = m["competition_code"]
     comp = await comp_data(code)
+    eld = await elo_data()
     all_m = comp.matches
     hid = (m.get("home_team") or {}).get("id")
     aid = (m.get("away_team") or {}).get("id")
-    home = comp.team(hid)
-    away = comp.team(aid)
+    home = _with_elo(comp.team(hid), eld, hid)
+    away = _with_elo(comp.team(aid), eld, aid)
+    pred = prediction(eld, m, _short(m, "home_team"), _short(m, "away_team"))
 
     avantages = None
     if home and away:
@@ -147,33 +162,29 @@ async def match_detail(match_id: int):
     lg_home_avg = sum(lg_home) / len(lg_home) if lg_home else 1.45
     lg_away_avg = sum(lg_away) / len(lg_away) if lg_away else 1.15
 
+    target = (pred["domicile_pct"] / 100, pred["nul_pct"] / 100, pred["exterieur_pct"] / 100) if pred else None
     signaux = build_signals(all_m, hid, aid,
                             home["nom_court"] if home else "Domicile",
                             away["nom_court"] if away else "Extérieur",
-                            lg_home_avg, lg_away_avg)
-    confrontations = head_to_head(all_m, hid, aid)
+                            lg_home_avg, lg_away_avg, target_1x2=target)
+    # confrontations : saison en cours + saisons précédentes chargées
+    older = await db.matches_history.find(
+        {"home_team.id": {"$in": [hid, aid]}, "away_team.id": {"$in": [hid, aid]}}, {"_id": 0}).to_list(50)
+    confrontations = head_to_head(all_m + older, hid, aid)
     if signaux.get("disponible"):
         hi = h2h_insight(confrontations)
         if hi:
             signaux["signaux"].append(hi)
 
-    # Indice de confiance (nombre de matchs analysés)
-    hm = (home or {}).get("stats", {}).get("matchs_analyses", 0) if home else 0
-    am = (away or {}).get("stats", {}).get("matchs_analyses", 0) if away else 0
-    mn = min(hm, am)
-    niveau = "Élevée" if mn >= 6 else ("Moyenne" if mn >= 4 else "Faible")
+    # Indice de confiance : nombre de matchs sur lesquels reposent les notes Elo
+    mn = pred["matchs_min"] if pred else 0
+    niveau = "Élevée" if mn >= BURN_IN else ("Moyenne" if mn >= 5 else "Faible")
     fiabilite = {
         "niveau": niveau, "matchs_min": mn,
-        "message": "Analyse fondée sur peu de matchs — à interpréter avec prudence." if mn < 4
-                   else "Échantillon suffisant pour une lecture fiable." if mn >= 6
-                   else "Échantillon modéré.",
+        "message": f"Notes Elo fondées sur au moins {mn} matchs par équipe"
+                   + (" — à interpréter avec prudence." if mn < 5 else "."),
     }
-
-    # Calibration : lien écart de notes ↔ résultats observés historiquement
-    cal = None
-    if home and away and home.get("global") and away.get("global"):
-        cal = calibration(await stats_analytics(None), home["global"]["score"], away["global"]["score"],
-                          home["nom_court"], away["nom_court"])
+    bet = await db.bets.find_one({"_id": match_id}, {"home_odds": 1, "draw_odds": 1, "away_odds": 1, "bookmaker": 1})
 
     # Jours de repos (dernier match joué avant celui-ci)
     def _last_played(team_id):
@@ -201,7 +212,9 @@ async def match_detail(match_id: int):
         "exterieur": away,
         "avantages": avantages,
         "fiabilite": fiabilite,
-        "calibration": cal,
+        "prediction": pred,
+        "cotes": odds_view(bet),
+        "value": value_pick(pred, bet),
         "repos": repos,
         "signaux": signaux,
         "confrontations": confrontations,
@@ -214,24 +227,33 @@ async def team(code: str, team_id: int):
     a = (await comp_data(code)).team(team_id)
     if not a:
         raise HTTPException(404, "Équipe introuvable ou sans match analysé")
-    return a
+    eld = await elo_data()
+    hist = eld.history.get(team_id, [])[-150:]
+    return {**_with_elo(a, eld, team_id),
+            "elo_historique": [{"date": d, "elo": e} for d, e in hist]}
 
 
 @router.get("/leaderboard/teams")
-async def leaderboard_teams(code: str | None = None):
+async def leaderboard_teams(code: str | None = None, tri: str = "elo"):
+    """Classement des équipes par Elo (défaut) ou par note /100 (`tri=note`)."""
     # « Tous » = championnats uniquement : les coupes dupliqueraient les clubs
     # (note calculée sur une autre compétition) et mêleraient des sélections nationales.
     codes = [code] if code else [c for c in configured_codes() if not is_cup(c)]
+    eld = await elo_data()
     result = []
     for c in codes:
         comp = await comp_data(c)
-        for a in comp.analyses.values():
+        for tid, a in comp.analyses.items():
             if a and a.get("global"):
                 row = compact(a)
                 row["competition_code"] = c
                 row["competition_nom"] = COMPETITION_META.get(c, {}).get("nom")
+                row["elo"] = (eld.team(tid) or {}).get("elo")
                 result.append(row)
-    result.sort(key=lambda x: (x.get("global") or 0), reverse=True)
+    if tri == "note":
+        result.sort(key=lambda x: (x.get("global") or 0), reverse=True)
+    else:
+        result.sort(key=lambda x: (x.get("elo") or 0, x.get("global") or 0), reverse=True)
     return result
 
 
@@ -271,4 +293,4 @@ async def search(q: str = Query(..., min_length=2)):
 
 @router.get("/scoring/config")
 async def scoring_conf():
-    return {"equipes": scoring_config(), "joueurs": player_scoring_config()}
+    return {"equipes": scoring_config(), "joueurs": player_scoring_config(), "elo": elo_config()}

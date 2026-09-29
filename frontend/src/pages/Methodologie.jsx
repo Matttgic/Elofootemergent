@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { Skeleton } from "../components/ui/skeleton";
-import { BookOpen, ShieldCheck, Scale } from "lucide-react";
+import { BookOpen, ShieldCheck, Scale, Activity, AlertTriangle } from "lucide-react";
 
 function WeightBlock({ title, weights }) {
   const entries = Object.entries(weights || {});
@@ -58,7 +58,57 @@ export default function Methodologie() {
           </div>
         </div>
 
-        <h2 className="font-head text-xl font-bold text-slate-100 pt-2">Scores des équipes</h2>
+        {c.elo && (
+          <>
+            <h2 className="font-head text-xl font-bold text-slate-100 pt-2">Notes Elo et probabilités</h2>
+            <div className="card-surface rounded-xl p-5 space-y-3" data-testid="methodo-elo">
+              <div className="flex items-start gap-3">
+                <Activity className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
+                <div className="space-y-2">
+                  <p className="text-sm text-slate-300 leading-relaxed">{c.elo.principe}</p>
+                  <p className="text-sm text-slate-400 leading-relaxed">{c.elo.probabilites}</p>
+                </div>
+              </div>
+            </div>
+            <div className="card-surface rounded-xl p-5" data-testid="methodo-backtest">
+              <h3 className="font-head font-bold text-slate-100 mb-1">Test sur l'historique</h3>
+              <p className="text-xs text-slate-500 mb-3">
+                {c.elo.backtest.matchs.toLocaleString("fr-FR")} matchs ({c.elo.backtest.periode}) :{" "}
+                {c.elo.backtest.championnats}. Chaque saison est prédite avec un modèle ajusté sur les saisons précédentes.
+                Log-loss : plus c'est bas, plus les probabilités sont justes.
+              </p>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[10px] uppercase text-slate-500 text-left border-b border-slate-800">
+                    <th className="py-1.5 pr-2">Méthode</th>
+                    <th className="py-1.5 px-2 text-right">Log-loss</th>
+                    <th className="py-1.5 pl-2 text-right">Réussite</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {c.elo.backtest.log_loss.map((r) => (
+                    <tr key={r.modele} className={`border-b border-slate-800/60 ${r.modele === "Elo (site)" ? "text-cyan-300 font-semibold" : "text-slate-300"}`}>
+                      <td className="py-1.5 pr-2">{r.modele}</td>
+                      <td className="py-1.5 px-2 text-right font-stat">{r.valeur.toFixed(3)}</td>
+                      <td className="py-1.5 pl-2 text-right font-stat">{r.reussite_pct}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="mt-4 rounded-lg bg-amber-500/5 border border-amber-500/30 p-3 flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-xs text-slate-300 space-y-1">
+                  <p>{c.elo.value}</p>
+                  {c.elo.backtest.paris_roi_pct.map((p) => (
+                    <p key={p.strategie} className="font-stat">{p.strategie} : <b className="text-red-400">{p.roi} %</b> de rendement</p>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        <h2 className="font-head text-xl font-bold text-slate-100 pt-2">Scores des équipes (note /100)</h2>
         <WeightBlock title="Score global — pondération" weights={eq.score_global} />
         <WeightBlock title="Score offensif — pondération" weights={eq.score_offensif} />
         <WeightBlock title="Score défensif — pondération" weights={eq.score_defensif} />

@@ -8,10 +8,12 @@ from itertools import groupby
 
 from teamnames import normalize_team_name
 
-# Version du modèle de paris. Les paris figés avant la v2 (probabilités gonflées
-# par la calibration non chronologique, appariement cotes/matchs trop permissif)
-# sont exclus du bilan et remplacés s'ils sont encore à venir.
-MODELE_PARIS = 2
+# Version du modèle de paris. v2 : calibration chronologique et appariement strict ;
+# v3 : probabilités du modèle Elo. Les paris figés avec une version antérieure sont
+# exclus du bilan et remplacés s'ils sont encore à venir.
+MODELE_PARIS = 3
+
+VALUE_EDGE = 0.05         # avantage minimal (espérance de gain) pour signaler une « value »
 
 BANKROLL = 100.0
 KELLY_FRACTION = 0.25     # quart de Kelly
@@ -96,6 +98,37 @@ def settle_outcome(bet, match, now):
     if kick and (now - kick).total_seconds() > late:
         return "void"
     return None
+
+
+OUTCOMES = (("domicile", "home_odds", "domicile_pct"), ("nul", "draw_odds", "nul_pct"),
+            ("exterieur", "away_odds", "exterieur_pct"))
+
+
+def odds_view(bet):
+    """Cotes 1N2 figées pour un match (None sans cotes)."""
+    if not bet or not (bet.get("home_odds") and bet.get("away_odds")):
+        return None
+    return {"domicile": bet.get("home_odds"), "nul": bet.get("draw_odds"),
+            "exterieur": bet.get("away_odds"), "bookmaker": bet.get("bookmaker")}
+
+
+def value_pick(pred, bet, edge=VALUE_EDGE):
+    """Issue dont l'espérance de gain p × cote − 1 est la plus forte, si elle atteint
+    `edge` ; None sinon. Signal statistique, pas une garantie : sur l'historique, ces
+    écarts entre modèle et bookmaker n'ont pas été rentables (voir Méthodologie)."""
+    if not pred or not bet:
+        return None
+    best = None
+    for issue, odds_key, pct_key in OUTCOMES:
+        odds, p = bet.get(odds_key), (pred.get(pct_key) or 0) / 100
+        if odds and odds > 1:
+            ev = p * odds - 1
+            if best is None or ev > best["ev"]:
+                best = {"issue": issue, "cote": odds, "proba_pct": round(p * 100, 1), "ev": ev}
+    if not best or best["ev"] < edge:
+        return None
+    return {"issue": best["issue"], "cote": best["cote"], "proba_pct": best["proba_pct"],
+            "avantage_pct": round(best["ev"] * 100, 1)}
 
 
 def kelly_fraction(p, odds):
