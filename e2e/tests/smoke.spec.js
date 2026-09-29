@@ -84,6 +84,11 @@ test("méthodologie et recherche", async ({ page }) => {
   await expect(page.getByTestId("methodo-backtest").locator("tbody tr")).toHaveCount(5);
   await page.goto("/recherche?q=man");
   await expect(page.getByTestId("search-teams")).toContainText("Manchester City");
+  // un joueur trouvé mène à sa fiche
+  await page.goto("/recherche?q=Joueur 1");
+  await page.getByTestId("search-players").locator("a").first().click();
+  await expect(page).toHaveURL(/\/joueur\/\d+/);
+  await expect(page.getByTestId("player-header")).toBeVisible();
   expect(errors).toEqual([]);
 });
 
