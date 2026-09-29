@@ -396,6 +396,64 @@ def test_history_seasons_loaded_once_and_refusal_retried_later(api):
     assert ingest._season_year({"matches": [{"season": {"startDate": "2025-08-15"}}]}) == 2025
 
 
+def test_light_and_full_ingest_write_matches_in_bulk(api, monkeypatch):
+    """Synchros légère et complète avec un client football-data simulé : matchs
+    écrits (upsert groupé), historique chargé, classement et date de synchro."""
+    import ingest
+    import server
+
+    def item(mid, code, day, season=2026):
+        return {"id": mid, "utcDate": f"{season}-10-{day:02d}T15:00:00Z", "status": "SCHEDULED", "matchday": 9,
+                "competition": {"code": code}, "homeTeam": {"id": 1}, "awayTeam": {"id": 2},
+                "score": {"fullTime": {"home": None, "away": None}}, "season": {"startDate": f"{season}-08-01"}}
+
+    class FakeClient:
+        def __init__(self, token):
+            pass
+
+        async def matches_window(self, start, end):
+            return {"matches": [item(70001, "PL", 3), item(70002, "PL", 4), item(70003, "BL1", 4)]}
+
+        async def competition_matches(self, code, season=None):
+            if season:
+                return {"matches": [item(80000 + season, code, 5, season)]}
+            return {"filters": {"season": "2026"}, "matches": [item(70001, code, 3), item(70004, code, 5)]}
+
+        async def standings(self, code):
+            return {"season": {"id": 1}, "standings": [{"type": "TOTAL", "table": []}]}
+
+        async def close(self):
+            pass
+
+    async def no_players(db):
+        return {"ok": True}
+
+    monkeypatch.setenv("FOOTBALL_DATA_TOKEN", "jeton-test")
+    monkeypatch.setenv("COMPETITIONS", "PL")
+    monkeypatch.setattr(ingest, "FootballDataClient", FakeClient)
+    monkeypatch.setattr(ingest, "ingest_players", no_players)
+    monkeypatch.setattr(ingest, "ingest_fotmob_players", no_players)
+
+    async def scenario():
+        db = server.db
+        await db.meta.delete_one({"_id": "history"})
+        standings = await db.standings.find_one({"competition_code": "PL"}, {"_id": 0})
+        light = await ingest.run_light_ingest(db)
+        full = await ingest.run_ingest(db)
+        ids = {m["match_id"] async for m in db.matches.find({"match_id": {"$gte": 70000, "$lt": 71000}})}
+        hist = await db.matches_history.count_documents({"match_id": {"$in": [82025, 82024]}})
+        await db.matches.delete_many({"match_id": {"$gte": 70000, "$lt": 71000}})
+        await db.matches_history.delete_many({"match_id": {"$in": [82025, 82024]}})
+        await db.meta.update_one({"_id": "sync"}, {"$set": {"last_sync": NOW.isoformat()}})
+        await db.standings.replace_one({"competition_code": "PL"}, standings)
+        return light, full, ids, hist
+
+    light, full, ids, hist = asyncio.run(scenario())
+    assert light["ok"] and light["matchs_maj"] == 2          # BL1 hors des compétitions suivies
+    assert full["ok"] and full["matchs"] == 2 and full["historique"] == 2
+    assert ids == {70001, 70002, 70004} and hist == 2
+
+
 def test_sync_command_fails_loudly_without_token(api, capsys):
     """`python -m jobs light` renvoie un code d'erreur si le jeton manque (visible dans le cron)."""
     import jobs
