@@ -165,9 +165,16 @@ class EloData:
         self.ratings, self.pre = run["ratings"], run["pre"]
         self.history, self.league, self.played = run["history"], run["league"], run["played"]
         self.coefs = fit_outcome_model(matches, self.pre)
+        # Championnat de la saison en cours : une équipe sortie des championnats suivis
+        # (reléguée plus bas, par exemple) n'est plus classée avec son ancien championnat.
+        self.current_league = {}
+        for m in sorted(matches, key=lambda m: m["utc_date"]):
+            if m["match_id"] in current_ids and m.get("competition_code") not in cups:
+                for side in ("home_team", "away_team"):
+                    self.current_league[m[side]["id"]] = m["competition_code"]
         self.ranks = {}
         by_league = {}
-        for tid, lg in self.league.items():
+        for tid, lg in self.current_league.items():
             by_league.setdefault(lg, []).append(tid)
         for tids in by_league.values():
             tids.sort(key=lambda t: -self.ratings[t])
@@ -179,7 +186,7 @@ class EloData:
         if team_id not in self.ratings:
             return None
         rank = self.ranks.get(team_id)
-        lg = self.league.get(team_id)
+        lg = self.current_league.get(team_id) or self.league.get(team_id)
         return {"elo": round(self.ratings[team_id]), "matchs": self.played.get(team_id, 0),
                 "rang": rank[0] if rank else None, "sur": rank[1] if rank else None,
                 "championnat": lg, "championnat_nom": COMPETITION_META.get(lg, {}).get("nom")}
