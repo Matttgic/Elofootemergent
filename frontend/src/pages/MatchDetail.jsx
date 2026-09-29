@@ -108,12 +108,23 @@ export default function MatchDetail() {
   const [d, setD] = useState(null);
   const [loading, setLoading] = useState(true);
   const [formMap, setFormMap] = useState({});
+  const [noteHist, setNoteHist] = useState(null);
 
   useEffect(() => {
     setLoading(true);
     setFormMap({});
+    setNoteHist(null);
     api.get(`/match/${id}`).then((r) => setD(r.data)).catch(() => setD(null)).finally(() => setLoading(false));
   }, [id]);
+
+  // Matchs passés au même écart de notes /100 (championnats, match à venir uniquement)
+  const noteDom = d?.domicile?.global?.score, noteExt = d?.exterieur?.global?.score;
+  const upcomingLeague = d && d.match.status !== "FINISHED" && !d.match.competition?.coupe;
+  useEffect(() => {
+    if (!upcomingLeague || noteDom == null || noteExt == null || noteDom === noteExt) return;
+    api.get("/stats/ecart-notes", { params: { domicile: noteDom, exterieur: noteExt } })
+      .then((r) => setNoteHist(r.data?.historique || null)).catch(() => {});
+  }, [upcomingLeague, noteDom, noteExt]);
 
   useEffect(() => {
     if (!d?.joueurs?.disponible) return;
@@ -225,6 +236,29 @@ export default function MatchDetail() {
                 <div>
                   Favori du modèle : <b className="text-emerald-400">{p.favori}</b> ({Math.round(p.favori_pct)} %)
                   {p.favori_pct < 45 ? ", match très ouvert" : ""}.
+                </div>
+              </div>
+            );
+          })()}
+          {noteHist && (() => {
+            const homeName = m.home_team?.shortName || "Dom.", awayName = m.away_team?.shortName || "Ext.";
+            const better = noteDom > noteExt ? homeName : awayName;
+            return (
+              <div className="mt-2 pt-2 border-t border-slate-800 text-xs text-slate-400" data-testid="note-history">
+                <div className="mb-1.5">
+                  Notes /100 : <b className="text-slate-200">{homeName} {noteDom}</b> contre{" "}
+                  <b className="text-slate-200">{awayName} {noteExt}</b> (écart {noteHist.ecart}). Par le passé, quand
+                  l'équipe la mieux notée (ici {better}) jouait {noteHist.terrain === "domicile" ? "à domicile" : "à l'extérieur"}{" "}
+                  avec un écart de {noteHist.tranche} ({noteHist.matchs} matchs) :
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  {[["victoire", noteHist.favori_gagne_pct, "text-emerald-400"], ["nul", noteHist.nul_pct, "text-slate-300"],
+                    ["défaite", noteHist.outsider_gagne_pct, "text-red-400"]].map(([l, v, c]) => (
+                    <div key={l} className="bg-slate-900/50 rounded-md py-1">
+                      <div className={`font-stat font-bold text-sm ${c}`}>{v}%</div>
+                      <div className="text-[10px] text-slate-500 truncate px-1">{l}</div>
+                    </div>
+                  ))}
                 </div>
               </div>
             );

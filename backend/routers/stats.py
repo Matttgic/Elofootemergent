@@ -4,9 +4,10 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
-from analytics import PROB_BUCKETS, bucket_label, comp_data, elo_data, prediction, stats_analytics
+from analytics import (PROB_BUCKETS, bucket_label, comp_data, elo_data, note_gap_history, prediction,
+                       stats_analytics)
 from betting import (MODELE_PARIS, clv_pct, kelly_fraction, match_fixture, settle_outcome,
                      simulate, value_bets, value_pick)
 from core import db
@@ -19,6 +20,13 @@ router = APIRouter(prefix="/api")
 @router.get("/stats")
 async def stats(code: str | None = None):
     return await stats_analytics(code)
+
+
+@router.get("/stats/ecart-notes")
+async def note_gap(domicile: int = Query(ge=0, le=100), exterieur: int = Query(ge=0, le=100)):
+    """Résultats passés des matchs au même écart de notes /100, l'équipe la mieux notée
+    jouant sur le même terrain (null si notes égales ou trop peu de matchs)."""
+    return {"historique": await note_gap_history(domicile, exterieur)}
 
 
 async def snapshot_bets():

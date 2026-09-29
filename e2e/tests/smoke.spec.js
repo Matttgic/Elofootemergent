@@ -52,6 +52,17 @@ test("fiche match puis fiche équipe : Elo, cotes et courbe d'évolution", async
   expect(errors).toEqual([]);
 });
 
+test("fiche match : matchs passés au même écart de notes /100", async ({ page }) => {
+  const errors = watchErrors(page);
+  // jeu de test déterministe : match à venir, notes 47 contre 51 (écart 4, mieux notée à
+  // l'extérieur), 27 matchs comparables
+  await page.goto("/match/86");
+  const hist = page.getByTestId("note-history");
+  await expect(hist).toContainText("Notes /100");
+  await expect(hist).toContainText("à l'extérieur avec un écart de 0–5 (27 matchs)");
+  expect(errors).toEqual([]);
+});
+
 test("classements : équipes triées par Elo puis par note, buteurs avec logos", async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto("/classements");
@@ -73,6 +84,20 @@ test("stats : qualité du modèle, avertissement et paris suivis", async ({ page
   const errors = watchErrors(page);
   await page.goto("/stats");
   await expect(page.getByTestId("stat-model-quality")).toBeVisible();
+  // écart de notes /100 (affiché par défaut) puis écart Elo
+  await expect(page.getByTestId("stat-better-note")).toContainText("Mieux notée");
+  await expect(page.getByTestId("note-tous-gap-40+")).toBeVisible();
+  await page.getByTestId("note-venue-domicile").click();
+  await expect(page.getByTestId("note-venue-summary")).toContainText("à domicile");
+  await expect(page.getByTestId("note-domicile-gap-0–5")).toBeVisible();
+  // simulateur : une équipe notée 60 en reçoit une notée 52 (écart 8)
+  await page.getByTestId("note-sim-home").fill("60");
+  await page.getByTestId("note-sim-away").fill("52");
+  await expect(page.getByTestId("note-sim-result")).toContainText("écart 5–10");
+  await page.getByTestId("note-sim-away").fill("60");
+  await expect(page.getByTestId("note-sim-result")).toContainText("Notes égales");
+  await page.getByTestId("gap-kind-elo").click();
+  await expect(page.getByTestId("stat-gap-200+")).toBeVisible();
   await expect(page.getByTestId("quality-calibration").locator("tbody tr").first()).toBeVisible();
   await expect(page.getByTestId("sim-backtest-warning")).toContainText("13 273");
   await expect(page.getByTestId("bets-rows-en_attente").locator("a")).toHaveCount(10);

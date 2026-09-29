@@ -206,7 +206,7 @@ async def match_detail(match_id: int):
     return {
         "match": {**match_summary(m),
                   "competition": {"code": code, "nom": COMPETITION_META.get(code, {}).get("nom"),
-                                  "pays": COMPETITION_META.get(code, {}).get("pays")},
+                                  "pays": COMPETITION_META.get(code, {}).get("pays"), "coupe": is_cup(code)},
                   "home_team": m.get("home_team"), "away_team": m.get("away_team")},
         "domicile": home,
         "exterieur": away,

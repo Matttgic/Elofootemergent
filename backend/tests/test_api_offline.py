@@ -255,6 +255,22 @@ def test_stats_and_simulation(api):
     assert q["matchs"] == st["echantillon_saison"] and 0 < q["modele"]["log_loss"] < 2
     assert q["avec_xg_pct"] > 90
     assert sum(c["matchs"] for c in q["calibration"]) == q["matchs"]
+    # écart des notes /100 avant-match, saison précédente comprise, selon le terrain
+    notes = st["notes"]
+    assert notes["disponible"] and notes["echantillon"] > notes["echantillon_saison"] > 0
+    split = notes["mieux_notee"]
+    assert split["tous"]["matchs"] == split["domicile"]["matchs"] + split["exterieur"]["matchs"] == notes["echantillon"]
+    for venue in ("tous", "domicile", "exterieur"):
+        rows = notes["par_ecart"][venue]
+        assert [r["tranche"] for r in rows][-1] == "40+" and rows[-1]["max"] is None
+        assert sum(r["matchs"] for r in rows) == split[venue]["matchs"]
+    # la fiche match retrouve la tranche de son écart et le terrain de la mieux notée
+    row = max(notes["par_ecart"]["exterieur"], key=lambda r: r["matchs"])
+    assert row["matchs"] >= 20
+    h = api.get("/api/stats/ecart-notes", params={"domicile": 50, "exterieur": 51 + row["min"]}).json()["historique"]
+    assert (h["tranche"], h["terrain"], h["ecart"], h["matchs"]) == (row["tranche"], "exterieur", row["min"] + 1, row["matchs"])
+    assert api.get("/api/stats/ecart-notes", params={"domicile": 60, "exterieur": 60}).json()["historique"] is None
+    assert api.get("/api/stats/ecart-notes", params={"domicile": 101, "exterieur": 60}).status_code == 422
     sim = api.get("/api/bets/simulation").json()
     # journée 8 jouée (10 paris réglés), journée 9 à venir (10 en attente)
     assert sim["disponible"] and sim["en_attente"] == 10 and sim["annules"] == 0

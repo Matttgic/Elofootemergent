@@ -9,18 +9,23 @@ expiration de cache déclenche le même calcul en parallèle.
 """
 import asyncio
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
 from core import db
 from elo import (BURN_IN, HOME_ADV, XG_MIN_MATCHES, fit_outcome_model, fit_outcome_model_xg, outcome_probs,
                  run_elo, xg_diff, xg_form)
 from ingest import COMPETITION_META, configured_codes, is_cup
-from scoring import analyze_team
+from scoring import MIN_HISTORY, analyze_team, pre_match_ratings
 
 # Tranches d'écart Elo (avantage du terrain compris) pour les statistiques descriptives
 ELO_BUCKETS = [(0, 25, "0–25"), (25, 50, "25–50"), (50, 75, "50–75"), (75, 100, "75–100"),
                (100, 150, "100–150"), (150, 200, "150–200"), (200, 10 ** 6, "200+")]
+# Tranches d'écart de note globale /100 (sans avantage du terrain) : stats et fiche match
+NOTE_BUCKETS = [(0, 5, "0–5"), (5, 10, "5–10"), (10, 15, "10–15"), (15, 20, "15–20"), (20, 25, "20–25"),
+                (25, 30, "25–30"), (30, 35, "30–35"), (35, 40, "35–40"), (40, 101, "40+")]
+NOTE_VENUES = ("tous", "domicile", "exterieur")   # terrain de l'équipe la mieux notée
+NOTE_MIN_MATCHES = 20                             # échantillon minimum pour la fiche match
 # Tranches de probabilité du favori (calibration du modèle, simulation de paris)
 PROB_BUCKETS = [(0, 40, "< 40 %"), (40, 50, "40–50 %"), (50, 60, "50–60 %"),
                 (60, 70, "60–70 %"), (70, 101, "≥ 70 %")]
@@ -229,7 +234,7 @@ class EloData:
 
 async def elo_data():
     async def load():
-        proj = {"_id": 0, "match_id": 1, "competition_code": 1, "utc_date": 1, "status": 1,
+        proj = {"_id": 0, "match_id": 1, "competition_code": 1, "season": 1, "utc_date": 1, "status": 1,
                 "home_team.id": 1, "away_team.id": 1, "score.fullTime": 1, "xg": 1}
         current = await db.matches.find({"status": "FINISHED"}, proj).to_list(50000)
         older = await db.matches_history.find({"status": "FINISHED"}, proj).to_list(50000)
@@ -274,7 +279,7 @@ def _pct(part, whole):
 
 async def stats_analytics(code=None):
     """Statistiques descriptives et qualité du modèle. Chaque match terminé est comparé
-    aux notes Elo que les deux équipes avaient AVANT son coup d'envoi."""
+    aux notes (Elo et note globale /100) que les deux équipes avaient AVANT son coup d'envoi."""
     async def load():
         eld = await elo_data()
         leagues = {c for c in ([code] if code else configured_codes()) if not is_cup(c)}
@@ -282,52 +287,129 @@ async def stats_analytics(code=None):
     return await _cached(_stats_cache, code or "ALL", load)
 
 
+def _favourite_split(counts):
+    """{2: gagne, 1: nul, 0: perd} -> pourcentages du point de vue du favori."""
+    n = sum(counts.values())
+    return {"victoires_pct": _pct(counts[2], n), "nuls_pct": _pct(counts[1], n),
+            "defaites_pct": _pct(counts[0], n), "matchs": n}
+
+
+def _gap_rows(buckets, items):
+    """Résultats par tranche d'écart. items : (écart, résultat du favori — 2 gagne,
+    1 nul, 0 perd —, score vu du favori)."""
+    counts = {label: {0: 0, 1: 0, 2: 0} for _, _, label in buckets}
+    scores = {label: Counter() for _, _, label in buckets}
+    for gap, res, score in items:
+        label = bucket_label(buckets, gap)
+        counts[label][res] += 1
+        scores[label][score] += 1
+    rows = []
+    for lo, hi, label in buckets:
+        b, n = counts[label], sum(counts[label].values())
+        top = sorted(scores[label].items(), key=lambda x: (x[1], x[0]), reverse=True)[:4]
+        rows.append({"tranche": label, "min": lo, "max": hi if hi < buckets[-1][1] else None, "matchs": n,
+                     "favori_gagne_pct": _pct(b[2], n), "nul_pct": _pct(b[1], n),
+                     "outsider_gagne_pct": _pct(b[0], n),
+                     "scores_frequents": [{"score": k, "pct": _pct(v, n), "n": v} for k, v in top]})
+    return rows
+
+
+def _fav_result(m, fav_home):
+    """(résultat du favori 2/1/0, score « favori-adversaire »)."""
+    y = _outcome(m)
+    ft = m["score"]["fullTime"]
+    score = f"{ft['home']}-{ft['away']}" if fav_home else f"{ft['away']}-{ft['home']}"
+    return (y if fav_home else 2 - y), score
+
+
 def _compute_stats(eld, leagues):
     rated = [m for m in eld.matches if m.get("competition_code") in leagues
              and m["match_id"] in eld.pre and eld.pre[m["match_id"]][2] >= BURN_IN]
     fav = {0: 0, 1: 0, 2: 0}                  # 2 = le favori Elo gagne, 1 = nul, 0 = il perd
     home_out = {0: 0, 1: 0, 2: 0}
-    buckets = {label: {0: 0, 1: 0, 2: 0} for _, _, label in ELO_BUCKETS}
-    scores = {label: {} for _, _, label in ELO_BUCKETS}
+    items = []
     for m in rated:
         rh, ra, _ = eld.pre[m["match_id"]]
         diff = rh + HOME_ADV - ra
-        y = _outcome(m)
-        home_out[y] += 1
-        fav_home = diff >= 0
-        res = y if fav_home else 2 - y
+        home_out[_outcome(m)] += 1
+        res, score = _fav_result(m, diff >= 0)
         fav[res] += 1
-        label = bucket_label(ELO_BUCKETS, abs(diff))
-        buckets[label][res] += 1
-        ft = m["score"]["fullTime"]
-        sk = f"{ft['home']}-{ft['away']}" if fav_home else f"{ft['away']}-{ft['home']}"
-        scores[label][sk] = scores[label].get(sk, 0) + 1
+        items.append((abs(diff), res, score))
 
-    par_ecart = []
-    for _, _, label in ELO_BUCKETS:
-        b, n = buckets[label], sum(buckets[label].values())
-        tot = sum(scores[label].values())
-        top = sorted(scores[label].items(), key=lambda x: (x[1], x[0]), reverse=True)[:4]
-        par_ecart.append({"tranche": label, "matchs": n, "favori_gagne_pct": _pct(b[2], n),
-                          "nul_pct": _pct(b[1], n), "outsider_gagne_pct": _pct(b[0], n),
-                          "scores_frequents": [{"score": k, "pct": _pct(v, tot), "n": v} for k, v in top]})
-
-    n_fav, n_home = sum(fav.values()), sum(home_out.values())
+    n_home = sum(home_out.values())
     return {
         "disponible": len(rated) > 0,
         "echantillon": len(rated),
         "echantillon_saison": sum(1 for m in rated if m["match_id"] in eld.current_ids),
-        "favori_elo": {"victoires_pct": _pct(fav[2], n_fav), "nuls_pct": _pct(fav[1], n_fav),
-                       "defaites_pct": _pct(fav[0], n_fav)},
+        "favori_elo": _favourite_split(fav),
         "avantage_domicile": {"domicile_pct": _pct(home_out[2], n_home), "nul_pct": _pct(home_out[1], n_home),
                               "exterieur_pct": _pct(home_out[0], n_home)},
-        "par_ecart_elo": par_ecart,
+        "par_ecart_elo": _gap_rows(ELO_BUCKETS, items),
+        "notes": _note_stats(eld, leagues),
         "modele": _model_quality(eld, rated),
         "note": "Statistiques descriptives : chaque match terminé est comparé aux notes Elo que les deux "
                 "équipes avaient avant le coup d'envoi (avantage du terrain de "
                 f"{int(HOME_ADV)} points compris), une fois au moins {BURN_IN} matchs joués par chacune. "
                 "Championnats uniquement, saisons précédentes comprises quand elles sont disponibles.",
     }
+
+
+def _note_stats(eld, leagues):
+    """Résultat selon l'écart des notes globales /100 avant le coup d'envoi, calculées
+    comme sur le site : championnat par championnat et saison par saison, sur les seuls
+    matchs antérieurs (classement reconstitué à la date du match). Séparé selon que
+    l'équipe la mieux notée joue à domicile ou à l'extérieur."""
+    seasons = defaultdict(list)
+    for m in eld.matches:
+        if m.get("competition_code") in leagues:
+            current = m["match_id"] in eld.current_ids
+            seasons[(m["competition_code"], None if current else m.get("season"))].append(m)
+    pre = {}
+    for ms in seasons.values():
+        pre.update(pre_match_ratings(ms))
+
+    fav = {v: {0: 0, 1: 0, 2: 0} for v in NOTE_VENUES}
+    items = {v: [] for v in NOTE_VENUES}
+    this_season = 0
+    for m in eld.matches:
+        notes = pre.get(m["match_id"])
+        if not notes or notes[0] == notes[1]:
+            continue
+        rh, ra = notes
+        res, score = _fav_result(m, rh > ra)
+        this_season += m["match_id"] in eld.current_ids
+        for v in ("tous", "domicile" if rh > ra else "exterieur"):
+            fav[v][res] += 1
+            items[v].append((abs(rh - ra), res, score))
+
+    n = len(items["tous"])
+    return {
+        "disponible": n > 0,
+        "echantillon": n,
+        "echantillon_saison": this_season,
+        "mieux_notee": {v: _favourite_split(fav[v]) for v in NOTE_VENUES},
+        "par_ecart": {v: _gap_rows(NOTE_BUCKETS, items[v]) for v in NOTE_VENUES},
+        "note": "Chaque match terminé est comparé aux notes globales /100 que les deux équipes avaient "
+                "avant le coup d'envoi (même calcul que sur le site, à partir des seuls matchs antérieurs "
+                f"du championnat, au moins {MIN_HISTORY} chacune). Contrairement à l'Elo, la note ne tient pas "
+                "compte du terrain : d'où la séparation domicile / extérieur. Matchs à notes égales exclus.",
+    }
+
+
+async def note_gap_history(note_home, note_away):
+    """Ce qui s'est passé dans les matchs passés où l'écart de notes /100 était du même
+    ordre, l'équipe la mieux notée jouant sur le même terrain. None si notes égales ou
+    échantillon trop petit."""
+    if note_home is None or note_away is None or note_home == note_away:
+        return None
+    notes = (await stats_analytics()).get("notes") or {}
+    venue = "domicile" if note_home > note_away else "exterieur"
+    gap = abs(note_home - note_away)
+    label = bucket_label(NOTE_BUCKETS, gap)
+    row = next((r for r in (notes.get("par_ecart") or {}).get(venue, []) if r["tranche"] == label), None)
+    if not row or row["matchs"] < NOTE_MIN_MATCHES:
+        return None
+    return {**row, "ecart": gap, "terrain": venue}
 
 
 def _model_quality(eld, rated):
