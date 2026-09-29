@@ -23,5 +23,5 @@ services:
         sync: false
       - key: FOOTBALL_DATA_TOKEN  # sert à /api/status (bandeau « clé requise » sinon)
         sync: false
-      - key: CORS_ORIGINS         # URL du frontend Vercel, ex. https://footpulse.vercel.app
+      - key: CORS_ORIGINS         # URL du frontend Vercel : https://footpulses.vercel.app
         sync: false
