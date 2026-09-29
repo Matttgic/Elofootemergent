@@ -137,6 +137,10 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
+Le workflow GitHub **Tests** (`.github/workflows/tests.yml`) lance automatiquement, sur
+chaque PR et chaque push sur `main`, ces tests hors ligne et le build de production du
+frontend (avec `CI=true`, comme sur Vercel).
+
 - `tests/test_unit_models.py` : moteur de notation, calibration, paris, noms d'équipe (hors ligne).
 - `tests/test_api_offline.py` : tous les endpoints sur une base MongoDB simulée (hors ligne).
 - Les autres fichiers sont des tests d'intégration (marqueur `integration`) qui interrogent

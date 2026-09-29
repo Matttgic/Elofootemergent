@@ -1,0 +1,61 @@
+name: Tests
+
+# Vérifie chaque PR (et chaque push sur main) : tests backend hors ligne et
+# build de production du frontend. Aucun secret n'est utilisé : les tests
+# d'intégration (backend déployé) sont ignorés sans REACT_APP_BACKEND_URL.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Erreurs Python (imports inutilisés, noms indéfinis…)
+        run: flake8 --select=F --exclude=__pycache__ .
+      - name: Tests
+        run: pytest
+
+  frontend:
+    name: Frontend (build de production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"   # même version que le projet Vercel
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+      - run: yarn install --frozen-lockfile
+      - name: Build (avertissements ESLint = erreurs, comme sur Vercel)
+        env:
+          CI: "true"
+          REACT_APP_BACKEND_URL: https://footpulse-api.onrender.com
+        run: yarn build
