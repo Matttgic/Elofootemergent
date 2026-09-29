@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { Skeleton } from "../components/ui/skeleton";
+import { BetsList } from "../components/BetsList";
 import { PieChart, TrendingUp, Home as HomeIcon, Scale, Coins, Clock, Target, AlertTriangle } from "lucide-react";
 
 function TriBar({ a, b, c, labels }) {
@@ -104,6 +105,14 @@ function BetSimulation({ sim }) {
             </div>
           </div>
 
+          {s.clv?.paris > 0 && (
+            <p className="text-xs text-slate-400 mb-4" data-testid="sim-clv">
+              Valeur de clôture (CLV) : <b className={s.clv.moyenne_pct > 0 ? "text-emerald-400" : "text-red-400"}>
+                {s.clv.moyenne_pct > 0 ? "+" : ""}{s.clv.moyenne_pct}%</b> en moyenne sur {s.clv.paris} paris ;
+              {" "}{s.clv.positifs_pct}% pris à une meilleure cote que la dernière relevée avant le match.
+              <span className="text-slate-500"> Une CLV positive durable est le meilleur signe d'un avantage réel.</span>
+            </p>
+          )}
           <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-2">Détail par probabilité du favori (modèle)</div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -293,6 +302,7 @@ export default function Stats() {
       </div>
 
       <BetSimulation sim={sim} />
+      <BetsList />
     </div>
   );
 }

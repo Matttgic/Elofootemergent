@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter
 
 from analytics import PROB_BUCKETS, bucket_label, comp_data, elo_data, prediction, stats_analytics
-from betting import MODELE_PARIS, kelly_fraction, match_fixture, settle_outcome, simulate
+from betting import (MODELE_PARIS, clv_pct, kelly_fraction, match_fixture, settle_outcome,
+                     simulate, value_bets, value_pick)
 from core import db
 from odds_client import ODDS_SPORT, fetch_odds
 
@@ -21,13 +22,16 @@ async def stats(code: str | None = None):
 
 
 async def snapshot_bets():
-    """Fige un pari (cote du favori Elo + probabilités du modèle) pour chaque match à
-    venir dont on obtient les vraies cotes. Idempotent (un pari par match) ; un pari
-    figé avec un ancien modèle et encore en attente est remplacé."""
+    """Fige un pari (cote du favori Elo, issue « value » éventuelle, probabilités du
+    modèle) pour chaque match à venir dont on obtient les vraies cotes. Idempotent (un
+    pari par match) ; un pari figé avec un ancien modèle et encore en attente est
+    remplacé. Pour un pari déjà figé, seules les cotes les plus récentes sont notées
+    (valeur de clôture), sans appel supplémentaire."""
     if not os.environ.get("ODDS_API_KEY"):
         return {"ok": False, "raison": "cle_absente"}
     eld = await elo_data()
-    created = 0
+    created = updated = 0
+    now = datetime.now(timezone.utc).isoformat()
     for code, sport in ODDS_SPORT.items():
         try:
             fixtures = await fetch_odds(sport)
@@ -45,8 +49,13 @@ async def snapshot_bets():
             if not m:
                 continue
             mid = m["match_id"]
-            existing = await db.bets.find_one({"_id": mid}, {"modele": 1})
+            existing = await db.bets.find_one({"_id": mid}, {"modele": 1, "status": 1})
             if existing and (existing.get("modele") or 0) >= MODELE_PARIS:
+                if existing.get("status") == "pending":
+                    await db.bets.update_one({"_id": mid}, {"$set": {"cotes_recentes": {
+                        "domicile": fx["home_odds"], "nul": fx["draw_odds"], "exterieur": fx["away_odds"],
+                        "bookmaker": fx["bookmaker"], "at": now}}})
+                    updated += 1
                 continue
             pred = prediction(eld, m, (m.get("home_team") or {}).get("shortName") or "Domicile",
                               (m.get("away_team") or {}).get("shortName") or "Extérieur")
@@ -68,12 +77,12 @@ async def snapshot_bets():
                 "home_odds": fx["home_odds"], "draw_odds": fx["draw_odds"], "away_odds": fx["away_odds"],
                 "bookmaker": fx["bookmaker"], "model_prob": round(p, 4), "implied_prob": round(implied, 4),
                 "is_value": p > implied, "kelly_f": round(kelly_fraction(p, fav_odds), 4),
-                "commence_time": fx["commence_time"],
-                "snapshot_at": datetime.now(timezone.utc).isoformat(), "status": "pending",
+                "value": value_pick(pred, fx),
+                "commence_time": fx["commence_time"], "snapshot_at": now, "status": "pending",
             }, upsert=True)
             created += 1
-    logger.info("Paris figés (snapshot) : %s nouveaux", created)
-    return {"ok": True, "crees": created}
+    logger.info("Paris figés (snapshot) : %s nouveaux, %s cotes actualisées", created, updated)
+    return {"ok": True, "crees": created, "cotes_actualisees": updated}
 
 
 async def settle_bets():
@@ -111,12 +120,24 @@ async def bets_simulation():
     pending = [b for b in bets if b.get("status") == "pending"]
     voided = [b for b in bets if b.get("status") == "void"]
 
-    def agg(subset):
+    def agg(subset, clvs):
         by = {}
         for b in subset:
             by.setdefault(b["tranche"], []).append(b)
         par = [{"tranche": lbl, **simulate(by[lbl])} for _, _, lbl in PROB_BUCKETS if lbl in by]
-        return {"total": simulate(subset), "par_ecart": par}
+        clvs = [c for c in clvs if c is not None]
+        clv = {"paris": len(clvs),
+               "moyenne_pct": round(sum(clvs) / len(clvs), 2) if clvs else None,
+               "positifs_pct": round(sum(c > 0 for c in clvs) / len(clvs) * 100, 1) if clvs else None}
+        return {"total": simulate(subset), "par_ecart": par, "clv": clv}
+
+    def clv_of(b, issue, odds):
+        last = (b.get("cotes_recentes") or {}).get(issue)
+        return clv_pct(odds, last)
+
+    fav_issue = {"home": "domicile", "away": "exterieur"}
+    fav_clv = [clv_of(b, fav_issue.get(b.get("fav_side")), b.get("fav_odds")) for b in settled]
+    val_clv = [clv_of(b, b["value"]["issue"], b["value"]["cote"]) for b in settled if b.get("value")]
 
     return {
         "disponible": len(settled) > 0,
@@ -127,10 +148,48 @@ async def bets_simulation():
         "regles": "Pari sur le favori du modèle Elo (1N2), aux vraies cotes du bookmaker "
                   "(France en priorité, sinon bet365/pinnacle). Le P&L se construit au fil des "
                   "matchs joués. Probabilité du modèle = probabilité de victoire du favori selon l'Elo "
-                  "avant-match. Value = pari placé seulement quand cette probabilité dépasse la "
-                  "probabilité implicite de la cote. Kelly = quart de Kelly, plafonné à 5 % de la "
+                  "avant-match. Value = pari sur l'issue (1, N ou 2) dont l'espérance de gain selon le "
+                  "modèle atteint au moins 5 %, s'il y en a une. CLV = cote obtenue comparée à la dernière "
+                  "cote relevée avant le match. Kelly = quart de Kelly, plafonné à 5 % de la "
                   "bankroll courante. Un match annulé ou non joué dans les 72 h suivant l'horaire "
                   "prévu annule le pari (mise remboursée). Détail par tranche de probabilité du favori.",
-        "strategies": {"favori": agg(settled),
-                       "value": agg([b for b in settled if b.get("is_value")])},
+        "strategies": {"favori": agg(settled, fav_clv),
+                       "value": agg(value_bets(settled), val_clv)},
     }
+
+
+@router.get("/bets")
+async def bets_list(statut: str = "en_attente", limit: int = 50):
+    """Paris suivis (modèle courant) : en attente (prochains d'abord) ou réglés
+    (derniers d'abord), avec le match, les issues jouées et la valeur de clôture."""
+    pending = statut == "en_attente"
+    q = {"modele": {"$gte": MODELE_PARIS},
+         "status": "pending" if pending else {"$in": ["won", "lost", "void"]}}
+    docs = await db.bets.find(q).sort("commence_time", 1 if pending else -1).to_list(max(1, min(limit, 200)))
+    ids = [b["_id"] for b in docs]
+    matches = {m["match_id"]: m for m in await db.matches.find(
+        {"match_id": {"$in": ids}},
+        {"_id": 0, "match_id": 1, "utc_date": 1, "home_team": 1, "away_team": 1, "score.fullTime": 1}).to_list(len(ids) or 1)}
+    fav_issue = {"home": "domicile", "away": "exterieur"}
+    out = []
+    for b in docs:
+        m = matches.get(b["_id"]) or {}
+        last = b.get("cotes_recentes") or {}
+        ft = (m.get("score") or {}).get("fullTime") or {}
+        issue = fav_issue.get(b.get("fav_side"))
+        v = b.get("value")
+        out.append({
+            "match_id": b["_id"], "date": m.get("utc_date") or b.get("commence_time"),
+            "competition_code": b.get("competition_code"),
+            "domicile": {"nom": (m.get("home_team") or {}).get("shortName"), "logo": (m.get("home_team") or {}).get("crest")},
+            "exterieur": {"nom": (m.get("away_team") or {}).get("shortName"), "logo": (m.get("away_team") or {}).get("crest")},
+            "score": {"home": ft.get("home"), "away": ft.get("away")} if not pending else None,
+            "probas": b.get("probas"),
+            "favori": {"issue": issue, "nom": b.get("fav_nom"), "cote": b.get("fav_odds"),
+                       "proba_pct": round((b.get("model_prob") or 0) * 100, 1),
+                       "clv_pct": clv_pct(b.get("fav_odds"), last.get(issue))},
+            "value": {**v, "clv_pct": clv_pct(v["cote"], last.get(v["issue"]))} if v else None,
+            "bookmaker": b.get("bookmaker"),
+            "statut": b.get("status"), "resultat": b.get("resultat"),
+        })
+    return {"statut": statut, "paris": out}

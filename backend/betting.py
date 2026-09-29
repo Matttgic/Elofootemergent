@@ -131,6 +131,33 @@ def value_pick(pred, bet, edge=VALUE_EDGE):
             "avantage_pct": round(best["ev"] * 100, 1)}
 
 
+ISSUE_RESULT = {"domicile": "home", "nul": "draw", "exterieur": "away"}
+
+
+def clv_pct(bet_odds, closing_odds):
+    """Valeur de clôture : cote obtenue / dernière cote relevée avant le match − 1.
+    Positive = pari pris à meilleur prix que le marché final (bon signe à long terme)."""
+    if not bet_odds or not closing_odds or closing_odds <= 1:
+        return None
+    return round((bet_odds / closing_odds - 1) * 100, 2)
+
+
+def value_bets(bets):
+    """Paris de la stratégie « Value » : l'issue repérée à la prise du pari (avantage
+    ≥ VALUE_EDGE), réglée d'après le résultat du match. Même format que les paris
+    « favori » pour simulate()."""
+    out = []
+    for b in bets:
+        v = b.get("value")
+        if not v or b.get("status") not in ("won", "lost"):
+            continue
+        won = b.get("resultat") == ISSUE_RESULT[v["issue"]]
+        out.append({"status": "won" if won else "lost", "fav_odds": v["cote"],
+                    "model_prob": v["proba_pct"] / 100, "commence_time": b.get("commence_time"),
+                    "tranche": b.get("tranche")})
+    return out
+
+
 def kelly_fraction(p, odds):
     """Part de bankroll misée : quart de Kelly plafonné à KELLY_CAP (0 sans avantage)."""
     b = (odds or 0) - 1
