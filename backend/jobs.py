@@ -90,6 +90,7 @@ async def ensure_indexes():
     await db.standings.create_index("competition_code", unique=True)
     await db.players.create_index([("competition_code", 1), ("team_id", 1)])
     await db.players.create_index("player_id")
+    await db.matches_history.create_index("match_id", unique=True)
 
 
 async def main(mode):

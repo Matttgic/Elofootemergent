@@ -1,4 +1,4 @@
-"""Iteration 8: confiance, calibration, Poisson 1N2+scores, H2H, repos,
+"""Iteration 8: confiance, probabilités Elo, Poisson scores, H2H, repos,
 fiche joueur, filtre poste. Regression on core endpoints."""
 import pytest
 import requests
@@ -17,7 +17,7 @@ def s():
     return sess
 
 
-# ---- Match detail: fiabilite, calibration, repos, probabilites ----
+# ---- Match detail: fiabilite, prediction Elo, repos, probabilites ----
 def test_match_detail_new_fields(s):
     r = s.get(f"{API}/match/{BIG_FAV_MATCH}", timeout=60)
     assert r.status_code == 200
@@ -30,12 +30,12 @@ def test_match_detail_new_fields(s):
     assert "repos" in d
     rep = d["repos"]
     assert "domicile" in rep and "exterieur" in rep
-    # calibration (peut être None mais ici Arsenal vs Coventry -> attendu)
-    cal = d.get("calibration")
-    assert cal is not None, "Calibration attendue pour match PL avec écart"
-    for k in ("ecart", "tranche", "favori", "favori_gagne_pct", "nul_pct",
-              "outsider_gagne_pct", "echantillon"):
-        assert k in cal
+    # probabilités Elo (attendues ici : Arsenal vs Coventry)
+    pred = d.get("prediction")
+    assert pred is not None, "Probabilités Elo attendues pour ce match"
+    for k in ("elo_domicile", "elo_exterieur", "ecart", "favori", "favori_pct",
+              "domicile_pct", "nul_pct", "exterieur_pct"):
+        assert k in pred
     # signaux + probabilites
     sig = d["signaux"]
     assert sig["disponible"] is True
@@ -138,8 +138,8 @@ def test_stats_endpoint(s):
     assert r.status_code == 200
     d = r.json()
     assert d["disponible"] is True
-    tranches = [b["tranche"] for b in d["par_ecart_note"]]
-    assert tranches == ["0–5", "5–10", "10–15", "15–20", "20–25", "25–30", "30–35", "35–40", "40–45", "45–50", "50+"]
+    tranches = [b["tranche"] for b in d["par_ecart_elo"]]
+    assert tranches == ["0–25", "25–50", "50–75", "75–100", "100–150", "150–200", "200+"]
 
 
 def test_leaderboard_teams(s):

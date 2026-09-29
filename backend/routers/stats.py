@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
-from analytics import STAT_BUCKETS, calibration, comp_data, stats_analytics
+from analytics import PROB_BUCKETS, bucket_label, comp_data, elo_data, prediction, stats_analytics
 from betting import MODELE_PARIS, kelly_fraction, match_fixture, settle_outcome, simulate
 from core import db
 from odds_client import ODDS_SPORT, fetch_odds
@@ -21,12 +21,12 @@ async def stats(code: str | None = None):
 
 
 async def snapshot_bets():
-    """Fige un pari (cote favori + écart de notes) pour chaque match à venir dont
-    on obtient les vraies cotes. Idempotent (un pari par match) ; un pari figé
-    avec un ancien modèle et encore en attente est remplacé."""
+    """Fige un pari (cote du favori Elo + probabilités du modèle) pour chaque match à
+    venir dont on obtient les vraies cotes. Idempotent (un pari par match) ; un pari
+    figé avec un ancien modèle et encore en attente est remplacé."""
     if not os.environ.get("ODDS_API_KEY"):
         return {"ok": False, "raison": "cle_absente"}
-    sd = await stats_analytics(None)
+    eld = await elo_data()
     created = 0
     for code, sport in ODDS_SPORT.items():
         try:
@@ -48,24 +48,23 @@ async def snapshot_bets():
             existing = await db.bets.find_one({"_id": mid}, {"modele": 1})
             if existing and (existing.get("modele") or 0) >= MODELE_PARIS:
                 continue
-            home = comp.team((m.get("home_team") or {}).get("id"))
-            away = comp.team((m.get("away_team") or {}).get("id"))
-            if not (home and away and home.get("global") and away.get("global")):
+            pred = prediction(eld, m, (m.get("home_team") or {}).get("shortName") or "Domicile",
+                              (m.get("away_team") or {}).get("shortName") or "Extérieur")
+            if not pred or not pred["fiable"]:
                 continue
-            cal = calibration(sd, home["global"]["score"], away["global"]["score"],
-                              home["nom_court"], away["nom_court"])
-            if not cal:
-                continue
-            fav_side = "home" if cal["favori_cote"] == "domicile" else "away"
+            fav_side = "home" if pred["favori_cote"] == "domicile" else "away"
             fav_odds = fx["home_odds"] if fav_side == "home" else fx["away_odds"]
             if not fav_odds or fav_odds <= 1:
                 continue
-            p = cal["favori_gagne_pct"] / 100.0
+            p = pred["favori_pct"] / 100.0
             implied = 1.0 / fav_odds
             await db.bets.replace_one({"_id": mid}, {
                 "_id": mid, "modele": MODELE_PARIS,
-                "competition_code": code, "ecart": cal["ecart"], "tranche": cal["tranche"],
-                "fav_side": fav_side, "fav_nom": cal["favori"], "fav_odds": round(fav_odds, 3),
+                "competition_code": code, "ecart": pred["ecart"],
+                "tranche": bucket_label(PROB_BUCKETS, pred["favori_pct"]),
+                "probas": {"domicile": pred["domicile_pct"], "nul": pred["nul_pct"],
+                           "exterieur": pred["exterieur_pct"]},
+                "fav_side": fav_side, "fav_nom": pred["favori"], "fav_odds": round(fav_odds, 3),
                 "home_odds": fx["home_odds"], "draw_odds": fx["draw_odds"], "away_odds": fx["away_odds"],
                 "bookmaker": fx["bookmaker"], "model_prob": round(p, 4), "implied_prob": round(implied, 4),
                 "is_value": p > implied, "kelly_f": round(kelly_fraction(p, fav_odds), 4),
@@ -116,7 +115,7 @@ async def bets_simulation():
         by = {}
         for b in subset:
             by.setdefault(b["tranche"], []).append(b)
-        par = [{"tranche": lbl, **simulate(by[lbl])} for _, _, lbl in STAT_BUCKETS if lbl in by]
+        par = [{"tranche": lbl, **simulate(by[lbl])} for _, _, lbl in PROB_BUCKETS if lbl in by]
         return {"total": simulate(subset), "par_ecart": par}
 
     return {
@@ -125,13 +124,13 @@ async def bets_simulation():
         "en_attente": len(pending),
         "annules": len(voided),
         "paris_anciens_exclus": anciens,
-        "regles": "Pari sur l'équipe la mieux notée (1N2), aux vraies cotes du bookmaker "
+        "regles": "Pari sur le favori du modèle Elo (1N2), aux vraies cotes du bookmaker "
                   "(France en priorité, sinon bet365/pinnacle). Le P&L se construit au fil des "
-                  "matchs joués. Probabilité du modèle = % de victoire du favori observé avant-match "
-                  "dans la même tranche d'écart. Value = pari placé seulement quand cette probabilité "
-                  "dépasse la probabilité implicite de la cote. Kelly = quart de Kelly, plafonné à 5 % "
-                  "de la bankroll courante. Un match annulé ou non joué dans les 72 h suivant l'horaire "
-                  "prévu annule le pari (mise remboursée).",
+                  "matchs joués. Probabilité du modèle = probabilité de victoire du favori selon l'Elo "
+                  "avant-match. Value = pari placé seulement quand cette probabilité dépasse la "
+                  "probabilité implicite de la cote. Kelly = quart de Kelly, plafonné à 5 % de la "
+                  "bankroll courante. Un match annulé ou non joué dans les 72 h suivant l'horaire "
+                  "prévu annule le pari (mise remboursée). Détail par tranche de probabilité du favori.",
         "strategies": {"favori": agg(settled),
                        "value": agg([b for b in settled if b.get("is_value")])},
     }

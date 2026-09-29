@@ -85,7 +85,7 @@ def test_stats_global(s):
     d = r.json()
     assert d["disponible"] is True
     assert d["echantillon"] > 0
-    ns = d["note_superieure"]
+    ns = d["favori_elo"]
     for k in ("victoires_pct", "nuls_pct", "defaites_pct"):
         assert k in ns
         assert ns[k] is None or 0 <= ns[k] <= 100
@@ -93,17 +93,16 @@ def test_stats_global(s):
     for k in ("domicile_pct", "nul_pct", "exterieur_pct"):
         assert k in ah
         assert 0 <= ah[k] <= 100
-    par = d["par_ecart_note"]
+    par = d["par_ecart_elo"]
     labels = [b["tranche"] for b in par]
-    assert labels == ["0–5", "5–10", "10–15", "15–20", "20–25", "25–30", "30–35", "35–40", "40–45", "45–50", "50+"]
+    assert labels == ["0–25", "25–50", "50–75", "75–100", "100–150", "150–200", "200+"]
     for b in par:
-        for k in ("matchs", "note_sup_gagne_pct", "nul_pct", "note_inf_gagne_pct"):
+        for k in ("matchs", "favori_gagne_pct", "nul_pct", "outsider_gagne_pct"):
             assert k in b
-    # Monotonicity: higher gap => note_sup_gagne_pct trends upward (allow noise)
-    pcts = [b["note_sup_gagne_pct"] for b in par if b["matchs"] >= 5 and b["note_sup_gagne_pct"] is not None]
+    # Plus l'écart Elo est grand, plus le favori gagne souvent (bruit toléré)
+    pcts = [b["favori_gagne_pct"] for b in par if b["matchs"] >= 5 and b["favori_gagne_pct"] is not None]
     assert len(pcts) >= 3
-    # First bucket win% should be lower than last bucket win%
-    print("note_sup pct by bucket (matchs>=5):", pcts)
+    print("favori_gagne_pct par tranche (matchs>=5):", pcts)
     assert pcts[0] < pcts[-1], f"Not monotonic: {pcts}"
 
 

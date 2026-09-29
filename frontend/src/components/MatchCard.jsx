@@ -4,8 +4,9 @@ import { ScoreBadge } from "./ScoreBadge";
 import { ScoreBar } from "./ScoreBar";
 import { FormChips } from "./FormChips";
 import { DataUnavailable } from "./DataUnavailable";
+import { ProbabilityBar, OddsLine, ValueBadge } from "./Probabilities";
 import { kickoff } from "../lib/format";
-import { ChevronRight, Zap } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 
 function TeamRow({ team, side }) {
   if (!team) return <div className="text-sm text-slate-500 py-2">Équipe inconnue</div>;
@@ -26,7 +27,7 @@ export function MatchCard({ match, index = 0 }) {
   const finished = match.status === "FINISHED";
   const inplay = ["IN_PLAY", "PAUSED"].includes(match.status);
   const h = match.domicile, a = match.exterieur;
-  const cal = match.calibration;
+  const pred = match.prediction;
   const testid = `match-card-${match.match_id}`;
 
   return (
@@ -72,39 +73,27 @@ export function MatchCard({ match, index = 0 }) {
             </div>
           </div>
 
-          {cal && (
-            <div className={`mt-3 rounded-lg px-3 py-2 border ${cal.value ? "bg-amber-500/10 border-amber-500/40" : "bg-slate-800/40 border-slate-800"}`} data-testid={`${testid}-calibration`}>
+          {pred && (
+            <div className={`mt-3 rounded-lg px-3 py-2 border ${match.value ? "bg-amber-500/10 border-amber-500/40" : "bg-slate-800/40 border-slate-800"}`} data-testid={`${testid}-prediction`}>
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[10px] uppercase tracking-wide text-slate-500 font-head flex items-center gap-1.5">
-                  Écart de notes
-                  {cal.value && (
-                    <span className="inline-flex items-center gap-0.5 text-amber-400 font-bold" data-testid={`${testid}-value-badge`}>
-                      <Zap className="w-3 h-3 fill-amber-400" /> VALUE
-                    </span>
-                  )}
+                  {finished ? "Probabilités avant-match" : "Probabilités"} · Elo
+                  <ValueBadge value={match.value} testid={`${testid}-value-badge`} />
                 </span>
-                <span className="text-[11px] font-stat font-bold text-slate-200" data-testid={`${testid}-gap`}>
-                  {cal.ecart} pts · <span className="text-emerald-400">{cal.favori}</span>
+                <span className="text-[11px] font-stat text-slate-400" data-testid={`${testid}-elo`}
+                  title="Notes Elo (domicile · extérieur)">
+                  {pred.elo_domicile} · {pred.elo_exterieur}
                 </span>
               </div>
-              <div className="flex h-2 rounded-full overflow-hidden bg-slate-900" title={`Sur ${cal.echantillon} matchs comparables`}>
-                <div style={{ width: `${cal.favori_gagne_pct}%` }} className="bg-emerald-500 transition-[width] duration-500" />
-                <div style={{ width: `${cal.nul_pct}%` }} className="bg-slate-600 transition-[width] duration-500" />
-                <div style={{ width: `${cal.outsider_gagne_pct}%` }} className="bg-rose-500 transition-[width] duration-500" />
-              </div>
-              <div className="flex items-center justify-between mt-1 text-[10px] font-stat">
-                <span className="text-emerald-400" data-testid={`${testid}-fav-pct`}>{cal.favori_gagne_pct}% favori</span>
-                <span className="text-slate-500">{cal.nul_pct}% nul</span>
-                <span className="text-rose-400">{cal.outsider_gagne_pct}% surprise</span>
-              </div>
-              {cal.score_frequent && (
-                <div className="mt-1.5 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[10px]">
-                  <span className="text-slate-500 uppercase tracking-wide">Score le + fréquent</span>
-                  <span className="font-stat" data-testid={`${testid}-top-score`}>
-                    <b className="text-slate-100 tabular-nums">{cal.score_frequent.score}</b>
-                    <span className="text-emerald-400 ml-1.5">{cal.score_frequent.pct}%</span>
-                  </span>
+              <ProbabilityBar pred={pred} homeName={h?.nom_court || "Dom."} awayName={a?.nom_court || "Ext."}
+                testid={`${testid}-probas`} />
+              {match.cotes && (
+                <div className="mt-1.5 pt-1.5 border-t border-slate-800/80">
+                  <OddsLine cotes={match.cotes} value={match.value} testid={`${testid}-odds`} />
                 </div>
+              )}
+              {!pred.fiable && (
+                <div className="mt-1 text-[10px] text-slate-500">Notes encore peu fiables ({pred.matchs_min} matchs)</div>
               )}
             </div>
           )}

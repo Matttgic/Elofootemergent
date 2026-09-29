@@ -8,6 +8,7 @@ import { MarketSignals } from "../components/MarketSignals";
 import { PlayerWatchCard } from "../components/PlayerCard";
 import { DataUnavailable } from "../components/DataUnavailable";
 import { FormChips } from "../components/FormChips";
+import { OddsLine, ValueBadge } from "../components/Probabilities";
 import { frDate, kickoff, scoreColor } from "../lib/format";
 import { Skeleton } from "../components/ui/skeleton";
 import { ArrowLeft, Trophy, Users, History, Swords } from "lucide-react";
@@ -39,6 +40,12 @@ function TeamPanel({ team, side, code }) {
             <FormChips form={team.stats?.forme_recente} />
             {team.classement && (
               <span className="text-xs text-slate-500 font-stat">#{team.classement.position}</span>
+            )}
+            {team.elo && (
+              <span className="text-xs text-slate-400 font-stat" data-testid={`team-elo-${side}`}
+                title={team.elo.rang ? `${team.elo.rang}e Elo sur ${team.elo.sur} en ${team.elo.championnat_nom || team.elo.championnat}` : "Note Elo"}>
+                Elo <b className="text-slate-200">{team.elo.elo}</b>
+              </span>
             )}
           </div>
         </div>
@@ -162,7 +169,14 @@ export default function MatchDetail() {
       {d.signaux?.probabilites && (
         <div className="card-surface rounded-xl p-5 mb-6" data-testid="prediction-panel">
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <h3 className="font-head font-bold text-slate-100">Probabilités du match</h3>
+            <div>
+              <h3 className="font-head font-bold text-slate-100 flex items-center gap-2">
+                Probabilités du match <ValueBadge value={d.value} testid="detail-value-badge" />
+              </h3>
+              <div className="text-[11px] text-slate-500">
+                {d.signaux.probabilites.source === "Elo" ? "Modèle Elo" : "Loi de Poisson"}{finished ? " · avant le coup d'envoi" : ""}
+              </div>
+            </div>
             {d.fiabilite && (
               <span className="text-xs px-2 py-1 rounded font-stat font-bold" data-testid="confidence-badge"
                 style={{ color: d.fiabilite.niveau === "Élevée" ? "#10B981" : d.fiabilite.niveau === "Moyenne" ? "#F59E0B" : "#EF4444",
@@ -187,12 +201,23 @@ export default function MatchDetail() {
               <span key={i} className="font-stat bg-slate-800 rounded px-2 py-0.5 text-slate-200">{s.score} <span className="text-slate-500">{s.pct}%</span></span>
             ))}
           </div>
-          {d.calibration && (
-            <div className="mt-3 pt-3 border-t border-slate-800 text-xs text-slate-400" data-testid="calibration-note">
-              📊 Historiquement, avec un écart de <b className="text-slate-200">{d.calibration.ecart} pts</b> ({d.calibration.tranche}),
-              l'équipe favorite (<b className="text-emerald-400">{d.calibration.favori}</b>) l'emporte
-              <b className="text-slate-200"> {d.calibration.favori_gagne_pct}%</b> du temps
-              (nul {d.calibration.nul_pct}%, surprise {d.calibration.outsider_gagne_pct}%) — sur {d.calibration.echantillon} matchs.
+          {d.prediction && (
+            <div className="mt-3 pt-3 border-t border-slate-800 text-xs text-slate-400" data-testid="elo-note">
+              Elo : <b className="text-slate-200">{m.home_team?.shortName || "Dom."} {d.prediction.elo_domicile}</b> ·{" "}
+              <b className="text-slate-200">{m.away_team?.shortName || "Ext."} {d.prediction.elo_exterieur}</b> — écart de{" "}
+              <b className="text-slate-200">{d.prediction.ecart} pts</b> avantage du terrain compris, en faveur de{" "}
+              <b className="text-emerald-400">{d.prediction.favori}</b>.
+            </div>
+          )}
+          {d.cotes && (
+            <div className="mt-2 rounded-lg bg-slate-900/50 px-3 py-2" data-testid="detail-odds">
+              <OddsLine cotes={d.cotes} value={d.value} />
+              <div className="text-[10px] text-slate-500 mt-1">
+                {d.cotes.bookmaker ? `Bookmaker : ${d.cotes.bookmaker}. ` : ""}
+                {d.value
+                  ? `Écart modèle / cote : ${d.value.proba_pct}% estimés contre ${Math.round(100 / d.value.cote)}% implicites (avantage théorique ${d.value.avantage_pct}%). Signal indicatif, non rentable sur l'historique.`
+                  : "Aucun écart notable entre le modèle et la cote."}
+              </div>
             </div>
           )}
           {(d.repos?.domicile != null || d.repos?.exterieur != null) && (

@@ -22,6 +22,7 @@ export default function Leaderboards() {
   const [comps, setComps] = useState([]);
   const [code, setCode] = useState(null);
   const [teams, setTeams] = useState(null);
+  const [teamSort, setTeamSort] = useState("elo");
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("equipes");
   const [playersByTri, setPlayersByTri] = useState({});
@@ -32,10 +33,10 @@ export default function Leaderboards() {
 
   useEffect(() => {
     setLoading(true);
-    const params = code ? { code } : {};
+    const params = { tri: teamSort, ...(code ? { code } : {}) };
     api.get("/leaderboard/teams", { params })
       .then((r) => setTeams(r.data)).catch(() => setTeams([])).finally(() => setLoading(false));
-  }, [code]);
+  }, [code, teamSort]);
 
   // Une seule requête par (tri, poste), y compris en cas d'échec : l'erreur est
   // mémorisée (null) au lieu de relancer la requête en boucle.
@@ -128,6 +129,17 @@ export default function Leaderboards() {
             ))}
           </div>
 
+          <div className="flex items-center gap-2 mb-4 text-xs" data-testid="team-sort">
+            <span className="text-slate-500">Trier par</span>
+            {[["elo", "Elo"], ["note", "Note /100"]].map(([k, l]) => (
+              <button key={k} onClick={() => setTeamSort(k)} data-testid={`team-sort-${k}`}
+                className={`px-3 py-1 rounded-full font-medium ${teamSort === k ? "bg-cyan-500 text-white" : "bg-slate-800/60 text-slate-400"}`}>{l}</button>
+            ))}
+            <span className="text-slate-600 hidden sm:inline">
+              {teamSort === "elo" ? "· force sur la durée, comparable entre championnats" : "· forme sur les 10 derniers matchs"}
+            </span>
+          </div>
+
           {loading ? (
             <div className="space-y-2">{[...Array(8)].map((_, i) => <Skeleton key={i} className="h-16 rounded-xl bg-slate-800/50" />)}</div>
           ) : (
@@ -145,6 +157,12 @@ export default function Leaderboards() {
                         <FormChips form={t.forme_recente} />
                       </div>
                     </div>
+                    {t.elo && (
+                      <div className="text-right shrink-0" data-testid={`lb-team-elo-${t.team_id}`}>
+                        <div className="font-stat font-bold text-sm text-slate-100 tabular-nums">{t.elo}</div>
+                        <div className="text-[9px] uppercase text-slate-500">Elo</div>
+                      </div>
+                    )}
                     <ScoreBadge score={t.global} size="sm" />
                   </Link>
                   <button data-testid={`fav-toggle-${t.team_id}`}

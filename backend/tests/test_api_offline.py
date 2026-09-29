@@ -74,11 +74,25 @@ def dataset():
                 "yellow": i % 3, "red": 0, "last_synced_at": iso(NOW)} for i in range(40)]
     form = {"form_score": {"score": 55, "composantes": []},
             "resume": {"matchs": 6, "buts": 3, "passes": 1, "minutes": 480}, "matchs": []}
-    bets = [{"_id": m["match_id"], "modele": 2, "competition_code": "PL", "tranche": "5–10", "ecart": 7,
+    bets = [{"_id": m["match_id"], "modele": 3, "competition_code": "PL", "tranche": "50–60 %", "ecart": 70,
              "fav_side": "home", "fav_odds": 1.8 + 0.1 * k, "model_prob": 0.6, "is_value": k % 2 == 0,
+             "home_odds": 1.8 + 0.1 * k, "draw_odds": 3.6, "away_odds": 4.2, "bookmaker": "betclic_fr",
              "commence_time": m["utc_date"], "status": "pending"}
-            for k, m in enumerate(x for x in matches if x["competition_code"] == "PL" and x["matchday"] == 8)]
-    return matches, table, players, form, bets
+            for k, m in enumerate(x for x in matches if x["competition_code"] == "PL" and x["matchday"] in (8, 9))]
+    # saison précédente (19 journées) : historique Elo et confrontations directes
+    history = []
+    for r in range(19):
+        ids = list(range(1, 21))
+        rng.shuffle(ids)
+        kick = NOW.replace(hour=15) - timedelta(days=365 - 7 * r)
+        for i in range(0, 20, 2):
+            h, a = ids[i], ids[i + 1]
+            history.append({"match_id": 50000 + 10 * r + i // 2, "competition_code": "PL", "season": NOW.year - 1,
+                            "utc_date": iso(kick), "match_date": kick.date().isoformat(), "matchday": r + 1,
+                            "status": "FINISHED", "home_team": team(h), "away_team": team(a),
+                            "score": {"fullTime": {"home": min(6, int(rng.expovariate(1 / strength[h]))),
+                                                   "away": min(6, int(rng.expovariate(1 / strength[a])))}}})
+    return matches, table, players, form, bets, history
 
 
 @pytest.fixture(scope="module")
@@ -96,12 +110,13 @@ def api():
             import server
         finally:
             motor_asyncio.AsyncIOMotorClient = real_client
-        matches, table, players, form, bets = dataset()
+        matches, table, players, form, bets, history = dataset()
 
         async def seed(db):
-            for coll in ("matches", "standings", "players", "player_form", "bets", "meta"):
+            for coll in ("matches", "matches_history", "standings", "players", "player_form", "bets", "meta"):
                 await db[coll].delete_many({})
             await db.matches.insert_many(matches)
+            await db.matches_history.insert_many(history)
             await db.standings.insert_one({"competition_code": "PL", "table": table})
             await db.players.insert_many(players)
             await db.player_form.insert_one({"_id": "100", "updated_at": NOW.isoformat(), "data": form})
@@ -134,27 +149,42 @@ def test_matches_of_the_day(api):
     for m in d["matchs"]:
         assert m["competition"]["code"] == "PL" and m["status"] == "TIMED"
         assert isinstance(m["domicile"]["global"], int) and isinstance(m["exterieur"]["global"], int)
-        if m["calibration"]:
-            assert {"ecart", "tranche", "favori", "favori_gagne_pct", "value"} <= set(m["calibration"])
+        p = m["prediction"]
+        assert abs(p["domicile_pct"] + p["nul_pct"] + p["exterieur_pct"] - 100) < 0.5
+        assert p["fiable"] is True and p["matchs_min"] >= 10     # saison précédente comprise
+        assert p["favori_pct"] == max(p["domicile_pct"], p["exterieur_pct"])
+        # cotes figées de la journée 9 : affichées, « value » seulement si l'avantage atteint 5 %
+        assert m["cotes"]["bookmaker"] == "betclic_fr"
+        if m["value"]:
+            assert m["value"]["avantage_pct"] >= 5
 
 
 def test_match_detail(api):
     d = api.get("/api/matches", params={"code": "PL", "date": _upcoming(api)}).json()
     detail = api.get(f"/api/match/{d['matchs'][0]['match_id']}").json()
-    assert {"match", "domicile", "exterieur", "avantages", "fiabilite", "calibration", "repos",
-            "signaux", "confrontations", "joueurs"} <= set(detail)
+    assert {"match", "domicile", "exterieur", "avantages", "fiabilite", "prediction", "cotes", "value",
+            "repos", "signaux", "confrontations", "joueurs"} <= set(detail)
     assert detail["signaux"]["disponible"] is True and detail["joueurs"]["disponible"] is True
     assert detail["fiabilite"]["niveau"] == "Élevée"
+    # probabilités affichées = Elo ; scores probables tirés d'une loi de Poisson alignée dessus
+    pred, probas = detail["prediction"], detail["signaux"]["probabilites"]
+    assert probas["source"] == "Elo" and probas["domicile_pct"] == round(pred["domicile_pct"])
+    assert detail["domicile"]["elo"]["elo"] == pred["elo_domicile"] and detail["domicile"]["elo"]["sur"] == 20
+    assert detail["confrontations"]   # saison précédente comprise
     assert api.get("/api/match/999999").status_code == 404
 
 
 def test_team_and_leaderboards(api):
     t = api.get("/api/team/PL/1").json()
     assert t["team_id"] == 1 and 0 <= t["global"]["score"] <= 100 and len(t["historique"]) == 8
+    assert t["elo"]["championnat"] == "PL" and 1 <= t["elo"]["rang"] <= 20
+    assert len(t["elo_historique"]) == t["elo"]["matchs"] and round(t["elo_historique"][-1]["elo"]) == t["elo"]["elo"]
     assert api.get("/api/team/PL/424242").status_code == 404
     tous = api.get("/api/leaderboard/teams").json()
     assert len(tous) == 20 and {x["competition_code"] for x in tous} == {"PL"}
-    assert [x["global"] for x in tous] == sorted((x["global"] for x in tous), reverse=True)
+    assert [x["elo"] for x in tous] == sorted((x["elo"] for x in tous), reverse=True)
+    par_note = api.get("/api/leaderboard/teams", params={"tri": "note"}).json()
+    assert [x["global"] for x in par_note] == sorted((x["global"] for x in par_note), reverse=True)
     assert {x["competition_code"] for x in api.get("/api/leaderboard/teams", params={"code": "CL"}).json()} == {"CL"}
 
 
@@ -179,16 +209,24 @@ def test_search_and_config(api):
     assert found["disponible"] is True
     assert all(j["team_logo"].startswith("https://crests.example/") for j in found["resultats"])
     conf = api.get("/api/scoring/config").json()
-    assert {"equipes", "joueurs"} == set(conf)
+    assert {"equipes", "joueurs", "elo"} == set(conf)
+    assert conf["elo"]["backtest"]["log_loss"][2]["modele"] == "Elo (site)"
 
 
 def test_stats_and_simulation(api):
     st = api.get("/api/stats").json()
-    assert st["disponible"] and st["echantillon"] > 0
-    assert [b["tranche"] for b in st["par_ecart_note"]][-1] == "50+"
+    assert st["disponible"] and st["echantillon"] > st["echantillon_saison"] > 0
+    assert [b["tranche"] for b in st["par_ecart_elo"]][-1] == "200+"
+    fav = st["favori_elo"]
+    assert abs(fav["victoires_pct"] + fav["nuls_pct"] + fav["defaites_pct"] - 100) < 0.5
+    q = st["modele"]
+    assert q["matchs"] == st["echantillon_saison"] and 0 < q["modele"]["log_loss"] < 2
+    assert sum(c["matchs"] for c in q["calibration"]) == q["matchs"]
     sim = api.get("/api/bets/simulation").json()
-    assert sim["disponible"] and sim["en_attente"] == 0 and sim["annules"] == 0
+    # journée 8 jouée (10 paris réglés), journée 9 à venir (10 en attente)
+    assert sim["disponible"] and sim["en_attente"] == 10 and sim["annules"] == 0
     assert sim["strategies"]["favori"]["total"]["paris"] == 10
+    assert [b["tranche"] for b in sim["strategies"]["favori"]["par_ecart"]] == ["50–60 %"]
 
 
 def test_analyses_cached_then_refreshed_after_sync(api):
@@ -240,6 +278,48 @@ def test_catch_up_when_data_is_stale(api, monkeypatch):
     assert asyncio.run(scenario(old)) is True and calls == [1]
     assert asyncio.run(scenario(old)) is False            # déjà tenté il y a moins de 30 min
     asyncio.run(server.db.meta.update_one({"_id": "sync"}, {"$set": {"last_sync": NOW.isoformat()}}))
+
+
+def test_history_seasons_loaded_once_and_refusal_retried_later(api):
+    """Saisons précédentes : chargées une fois ; un refus (403 de l'offre gratuite)
+    est mémorisé et ne sera retenté qu'après 7 jours."""
+    import httpx
+    import ingest
+    import server
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        async def competition_matches(self, code, season=None):
+            self.calls.append((code, season))
+            if season == 2023:
+                raise httpx.HTTPStatusError("403", request=httpx.Request("GET", "http://x"),
+                                            response=httpx.Response(403))
+            return {"matches": [{"id": 90000 + season, "utcDate": f"{season}-09-01T15:00:00Z",
+                                 "status": "FINISHED", "matchday": 1, "homeTeam": {"id": 1},
+                                 "awayTeam": {"id": 2}, "score": {"fullTime": {"home": 1, "away": 0}}}]}
+
+    async def scenario():
+        db = server.db
+        await db.meta.delete_one({"_id": "history"})
+        fake = FakeClient()
+        first = await ingest.ingest_history(db, fake, "PL", 2025)
+        again = await ingest.ingest_history(db, fake, "PL", 2025)
+        later = await ingest.ingest_history(db, fake, "PL", 2025, now=datetime.now(timezone.utc) + timedelta(days=8))
+        skipped = await ingest.ingest_history(db, fake, "WC", 2026)
+        meta = (await db.meta.find_one({"_id": "history"}))["saisons"]
+        doc = await db.matches_history.find_one({"match_id": 92024})
+        await db.matches_history.delete_one({"match_id": 92024})
+        return first, again, later, skipped, fake.calls, meta, doc
+
+    first, again, later, skipped, calls, meta, doc = asyncio.run(scenario())
+    assert (first, again, later, skipped) == (1, 0, 0, 0)
+    assert calls == [("PL", 2024), ("PL", 2023), ("PL", 2023)]   # 2024 acquis, 2023 retenté après 7 j
+    assert meta["PL-2024"]["statut"] == "ok" and meta["PL-2023"] == {**meta["PL-2023"], "statut": "refuse", "http": 403}
+    assert doc["season"] == 2024 and doc["competition_code"] == "PL"
+    assert ingest._season_year({"filters": {"season": "2026"}}) == 2026
+    assert ingest._season_year({"matches": [{"season": {"startDate": "2025-08-15"}}]}) == 2025
 
 
 def test_sync_command_fails_loudly_without_token(api, capsys):

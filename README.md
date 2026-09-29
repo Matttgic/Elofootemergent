@@ -1,8 +1,9 @@
 # FootPulse Analytics Pro
 
 Application web (en français) d'analyse statistique des matchs des championnats européens :
-notes sur 100 des équipes et des joueurs, signaux de marché (plus/moins de buts, les deux
-équipes marquent…), statistiques de calibration et simulation de paris sur cotes réelles.
+notes Elo et probabilités victoire / nul / défaite, notes sur 100 des équipes et des joueurs,
+signaux de marché (plus/moins de buts, les deux équipes marquent…), qualité du modèle et
+simulation de paris sur cotes réelles.
 
 **En ligne : https://footpulses.vercel.app** — API : https://footpulse-api.onrender.com
 (`/api/health`, `/api/status`).
@@ -18,15 +19,17 @@ fondés uniquement sur des données réelles, et une donnée absente est affich�
 backend/                   FastAPI + MongoDB (Motor), routes préfixées /api
   server.py                point d'entrée (uvicorn server:app) : app, CORS, planification
   core.py                  configuration (.env), journalisation, connexion MongoDB
-  analytics.py             chargement d'un championnat + analyses d'équipes, calibration, cache
+  analytics.py             chargement d'un championnat + analyses d'équipes, Elo, stats, cache
+  elo.py                   notes Elo (toutes compétitions, saisons précédentes) + modèle 1N2
   jobs.py                  synchronisations (ingestion puis règlement / prise des paris)
   routers/                 matches.py (matchs, équipes, recherche), players.py, stats.py (stats, paris)
-  scoring.py, signals.py   notation des équipes, notes avant-match, signaux (Poisson)
+  scoring.py, signals.py   notation /100 des équipes (forme), signaux (Poisson aligné sur l'Elo)
   player_scoring.py, player_form.py   notation et forme récente des joueurs
   betting.py               appariement cotes <-> matchs, Kelly, règlement des paris
   ingest.py, player_ingest.py         ingestion football-data.org, Understat, FotMob
   *_client.py              clients des sources externes
   teamnames.py             normalisation des noms d'équipe entre sources
+  tools/backtest_historique.py   backtest du modèle sur 8 saisons (football-data.co.uk)
 frontend/                  React (CRA + craco), Tailwind, shadcn/ui, recharts
 memory/PRD.md              journal produit : objectifs, décisions, historique des livraisons
 ```
@@ -133,6 +136,26 @@ dépôt sans aucune activité pendant 60 jours (les réactiver dans l'onglet *Ac
 Pour un serveur toujours allumé (VPS, Railway…), laisser `SCHEDULER_ENABLED=true` : l'API
 planifie alors elle-même les synchronisations et le workflow GitHub peut être désactivé.
 
+## Modèle et backtest
+
+Les probabilités 1N2 viennent d'un classement **Elo** (K = 20, avantage du terrain de 60
+points, marge de buts prise en compte) calculé sur toutes les compétitions et sur les deux
+saisons précédentes (chargées une fois depuis football-data.org), puis d'un modèle
+logistique ordonné qui convertit l'écart Elo en probabilités. Sur 13 273 matchs de 8
+championnats (2021-22 à 2026-27, chaque saison prédite sans regarder l'avenir) :
+
+| Méthode | Log-loss | Réussite |
+| --- | --- | --- |
+| Fréquences domicile / nul / extérieur | 1,073 | 43,7 % |
+| Ancienne note /100 (tranches d'écart) | 1,038 | 47,8 % |
+| **Elo (site)** | **0,990** | **51,8 %** |
+| Bet365 avant-match | 0,971 | 53,3 % |
+| Pinnacle à la clôture | 0,967 | 53,5 % |
+
+Les bookmakers restent plus précis : parier le favori du modèle aux cotes Bet365 aurait
+rendu −4,6 %, les paris « value » (avantage ≥ 5 %) −10 %. Pour reproduire :
+`cd backend && python -m tools.backtest_historique` (réseau requis).
+
 ## Tests
 
 ```bash
@@ -145,7 +168,7 @@ Le workflow GitHub **Tests** (`.github/workflows/tests.yml`) lance automatiqueme
 chaque PR et chaque push sur `main`, ces tests hors ligne et le build de production du
 frontend (avec `CI=true`, comme sur Vercel).
 
-- `tests/test_unit_models.py` : moteur de notation, calibration, paris, noms d'équipe (hors ligne).
+- `tests/test_unit_models.py` : Elo et probabilités 1N2, notation, paris, noms d'équipe (hors ligne).
 - `tests/test_api_offline.py` : tous les endpoints sur une base MongoDB simulée (hors ligne).
 - Les autres fichiers sont des tests d'intégration (marqueur `integration`) qui interrogent
   un backend déployé : ils ne tournent que si `REACT_APP_BACKEND_URL` est défini, par

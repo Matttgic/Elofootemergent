@@ -78,11 +78,11 @@ export default function Home() {
     if (statut === "termines") return m.status === "FINISHED";
     return true;
   });
-  if (valueOnly) matchs = matchs.filter((m) => m.calibration?.value);
+  if (valueOnly) matchs = matchs.filter((m) => m.value);
   if (tri === "ecart") {
-    matchs = [...matchs].sort((a, b) => (b.calibration?.ecart ?? -1) - (a.calibration?.ecart ?? -1));
+    matchs = [...matchs].sort((a, b) => (b.prediction?.favori_pct ?? -1) - (a.prediction?.favori_pct ?? -1));
   }
-  const valueCount = allMatchs.filter((m) => m.calibration?.value).length;
+  const valueCount = allMatchs.filter((m) => m.value).length;
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-6">
@@ -93,7 +93,7 @@ export default function Home() {
             Matchs & Analyse
           </h1>
           <p className="text-slate-400 text-sm sm:text-base mt-1">
-            Notation statistique sur 100 des équipes des grands championnats européens.
+            Notes Elo, probabilités et analyse statistique des grands championnats européens.
           </p>
         </div>
         {status?.token_present && (
@@ -175,7 +175,7 @@ export default function Home() {
         <button onClick={() => setTri(tri === "ecart" ? "heure" : "ecart")} data-testid="sort-ecart-toggle"
           className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
             tri === "ecart" ? "bg-emerald-500 text-white" : "bg-slate-800/60 text-slate-400 hover:bg-slate-800"}`}>
-          <ArrowDownWideNarrow className="w-3.5 h-3.5" /> Trier par écart
+          <ArrowDownWideNarrow className="w-3.5 h-3.5" /> Trier par favori
         </button>
         <button onClick={() => setValueOnly((v) => !v)} data-testid="value-filter-toggle"
           className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
