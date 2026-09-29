@@ -175,6 +175,22 @@ football-data.co.uk (19 085 matchs notés), la mieux notée gagne 37 % des match
 écart de 0–5 et 70 % au-delà de 40 ; à écart de 0–10, jouer à l'extérieur la fait perdre
 plus souvent qu'elle ne gagne.
 
+**La note /100 comme modèle** (même protocole, 11 740 matchs où les deux notes existent) :
+
+| Méthode | Log-loss | Brier | Réussite |
+| --- | --- | --- | --- |
+| Note /100 seule (écart des notes globales) | 1,0220 | 0,6126 | 49,1 % |
+| **Elo seul (site)** | **0,9915** | **0,5916** | **51,7 %** |
+| Elo + note /100 | 0,9912 | 0,5915 | 51,8 % |
+| Elo + note globale, attaque, défense, forme | 0,9909 | 0,5912 | 52,0 % |
+| Pinnacle à la clôture | 0,9697 | 0,5770 | 53,4 % |
+
+Ajouter la note à l'Elo ne gagne que 0,0003 à 0,0006 (du niveau de la marge d'erreur, et
+moins bien la dernière saison) ; avec la forme xG, cela dégrade même le modèle (0,9824 →
+0,9826). Le modèle reste donc Elo (+ xG). La page Stats compare aussi, sur la saison en
+cours, le modèle du site à la note seule. Reproduire :
+`python -m tools.backtest_historique --notes`.
+
 ## Tests
 
 ```bash

@@ -299,6 +299,40 @@ function ModelQuality({ q }) {
           ? "Le modèle Elo fait mieux que cette référence."
           : "Le modèle ne fait pas mieux que cette référence sur cet échantillon."}
       </p>
+      {q.note_100 && (
+        <div className="mb-4" data-testid="quality-note">
+          <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-2">
+            Et la note /100 ? Mêmes {q.note_100.matchs} matchs
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[10px] uppercase text-slate-500 text-left border-b border-slate-800">
+                <th className="py-1.5 pr-2">Probabilités</th>
+                <th className="py-1.5 px-2 text-right whitespace-nowrap">Log-loss</th>
+                <th className="py-1.5 px-2 text-right">Brier</th>
+                <th className="py-1.5 pl-2 text-right">Réussite</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[[q.avec_xg_pct ? "Modèle du site (Elo + xG)" : "Modèle du site (Elo)", q.note_100.modele, "text-cyan-300 font-semibold", "model"],
+                ["Note /100 seule", q.note_100.note, "text-slate-200", "note"],
+                ["Référence (fréquences)", q.note_100.reference, "text-slate-400", "reference"]].map(([label, v, cls, k]) => (
+                <tr key={k} className={`border-b border-slate-800/60 ${cls}`} data-testid={`quality-note-${k}`}>
+                  <td className="py-1.5 pr-2">{label}</td>
+                  <td className="py-1.5 px-2 text-right font-stat">{v.log_loss}</td>
+                  <td className="py-1.5 px-2 text-right font-stat">{v.brier}</td>
+                  <td className="py-1.5 pl-2 text-right font-stat">{v.reussite_pct}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-[11px] text-slate-500 mt-2">
+            Note /100 seule : probabilités tirées du seul écart des notes globales avant le match
+            {q.note_100.hors_echantillon ? ", modèle ajusté sur les saisons précédentes" : ""}. Sur l'historique, ajouter la note
+            à l'Elo n'améliore pas les prévisions (détail dans la page Méthode).
+          </p>
+        </div>
+      )}
       <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-2">Calibration : le favori gagne-t-il aussi souvent que prévu ?</div>
       <table className="w-full text-sm" data-testid="quality-calibration">
         <thead>

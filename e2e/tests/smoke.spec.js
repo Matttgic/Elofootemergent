@@ -99,6 +99,7 @@ test("stats : qualité du modèle, avertissement et paris suivis", async ({ page
   await page.getByTestId("gap-kind-elo").click();
   await expect(page.getByTestId("stat-gap-200+")).toBeVisible();
   await expect(page.getByTestId("quality-calibration").locator("tbody tr").first()).toBeVisible();
+  await expect(page.getByTestId("quality-note-note")).toContainText("Note /100 seule");
   await expect(page.getByTestId("sim-backtest-warning")).toContainText("13 273");
   await expect(page.getByTestId("bets-rows-en_attente").locator("a")).toHaveCount(10);
   await page.getByTestId("bets-tab-regles").click();
@@ -111,6 +112,8 @@ test("méthodologie et recherche", async ({ page }) => {
   await page.goto("/methodologie");
   await expect(page.getByTestId("methodo-backtest").locator("table").first().locator("tbody tr")).toHaveCount(5);
   await expect(page.getByTestId("methodo-backtest-xg").locator("tbody tr")).toHaveCount(4);
+  await expect(page.getByTestId("methodo-backtest-notes").locator("tbody tr")).toHaveCount(7);
+  await expect(page.getByTestId("methodo-notes-conclusion")).toContainText("Elo (+ xG)");
   await expect(page.getByTestId("methodo-xg")).toContainText("xG");
   await page.goto("/recherche?q=man");
   await expect(page.getByTestId("search-teams")).toContainText("Manchester City");

@@ -118,8 +118,14 @@ def outcome_probs(diff, coefs=None, home_adv=HOME_ADV, xg_diff=None):
     eta = c["beta"] * x
     if xg_diff is not None and "beta_xg" in c:
         eta += c["beta_xg"] * xg_diff
-    p_away = _sig(c["theta_away"] - eta)
-    p_not_home = _sig(c["theta_draw"] - eta)
+    return ordered_probs(eta, c)
+
+
+def ordered_probs(eta, coefs):
+    """(domicile, nul, extérieur) pour l'indice eta (somme coefficient × variable) du
+    modèle logistique ordonné."""
+    p_away = _sig(coefs["theta_away"] - eta)
+    p_not_home = _sig(coefs["theta_draw"] - eta)
     return 1 - p_not_home, p_not_home - p_away, p_away
 
 
@@ -219,7 +225,7 @@ def fit_ordered_logit(xs, ys, iters=30):
         params, ll = cand, cll
         if converged:
             break
-    out = {"beta": params[0], "theta_away": params[k], "theta_draw": params[k + 1]}
+    out = {"beta": params[0], "betas": params[:k], "theta_away": params[k], "theta_draw": params[k + 1]}
     if k == 2:
         out["beta_xg"] = params[1]
     return out
@@ -342,6 +348,28 @@ BACKTEST = {
             {"modele": "Elo + forme xG (site)", "valeur": 0.983, "brier": 0.586},
             {"modele": "Pinnacle à la clôture", "valeur": 0.968, "brier": 0.576},
         ],
+    },
+    # Note /100 comme modèle 1N2 (logit ordonné sur l'écart des notes avant le match), seule
+    # ou combinée à l'Elo : 8 championnats, matchs où les deux notes existent (3 matchs joués)
+    "notes": {
+        "matchs": 11740,
+        "log_loss": [
+            {"modele": "Note /100 seule", "valeur": 1.0220, "brier": 0.6126, "reussite_pct": 49.1},
+            {"modele": "Note /100 : global, attaque, défense, forme", "valeur": 1.0201, "brier": 0.6112,
+             "reussite_pct": 49.3},
+            {"modele": "Elo seul (site)", "valeur": 0.9915, "brier": 0.5916, "reussite_pct": 51.7},
+            {"modele": "Elo + note /100", "valeur": 0.9912, "brier": 0.5915, "reussite_pct": 51.8},
+            {"modele": "Elo + les 4 notes", "valeur": 0.9909, "brier": 0.5912, "reussite_pct": 52.0},
+            {"modele": "Mélange 90 % Elo / 10 % note", "valeur": 0.9910, "brier": 0.5912, "reussite_pct": 51.8},
+            {"modele": "Pinnacle à la clôture", "valeur": 0.9697, "brier": 0.5770, "reussite_pct": 53.4},
+        ],
+        "conclusion": "Seule, la note /100 prévoit nettement moins bien que l'Elo (log-loss 1,022 contre "
+                      "0,992, écart constaté chaque saison) : elle ne regarde que les 10 derniers matchs du "
+                      "championnat en cours et ignore le terrain. Ajoutée à l'Elo, elle ne fait gagner que "
+                      "0,0003 à 0,0006 : 15 à 30 fois moins que la forme xG (−0,009), du niveau de la marge "
+                      "d'erreur, et la dernière saison est moins bonne ; avec la forme xG, elle dégrade même "
+                      "légèrement le modèle (0,9824 → 0,9826). L'Elo contient déjà l'information de la note : "
+                      "le modèle du site reste Elo (+ xG).",
     },
 }
 
