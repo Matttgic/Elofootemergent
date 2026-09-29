@@ -88,6 +88,12 @@ async def snapshot_bets():
 async def settle_bets():
     """Règle les paris en attente (aucun appel API) : gagné/perdu si le match est
     terminé, annulé (mise remboursée) si le match est annulé ou reporté hors délai."""
+    # Paris v3 figés avant l'ajout de l'issue « value » : complétée à partir des cotes et
+    # des probabilités enregistrées au moment du pari (aucune information postérieure).
+    async for b in db.bets.find({"modele": {"$gte": MODELE_PARIS}, "value": {"$exists": False},
+                                 "probas": {"$exists": True}}):
+        pred = {f"{issue}_pct": pct for issue, pct in b["probas"].items()}
+        await db.bets.update_one({"_id": b["_id"]}, {"$set": {"value": value_pick(pred, b)}})
     pending = await db.bets.find({"status": "pending"}).to_list(2000)
     now = datetime.now(timezone.utc)
     settled = 0

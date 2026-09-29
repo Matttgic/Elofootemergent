@@ -258,6 +258,30 @@ def test_stats_and_simulation(api):
     assert sim["strategies"]["value"]["clv"]["moyenne_pct"] == round((3.6 / 3.4 - 1) * 100, 2)
 
 
+def test_settle_backfills_value_from_snapshot_odds(api):
+    """Un pari v3 figé sans issue « value » la reçoit, calculée avec les cotes et
+    probabilités du moment du pari."""
+    import server
+    from routers.stats import settle_bets
+
+    async def scenario():
+        db = server.db
+        base = {"modele": 3, "status": "pending", "commence_time": "2099-01-01T15:00:00Z", "tranche": "40–50 %",
+                "probas": {"domicile": 38.3, "nul": 28.6, "exterieur": 33.1}}
+        await db.bets.insert_many([
+            {**base, "_id": 990001, "home_odds": 3.35, "draw_odds": 3.03, "away_odds": 2.03},
+            {**base, "_id": 990002, "home_odds": 2.4, "draw_odds": 3.2, "away_odds": 2.9},
+        ])
+        await settle_bets()
+        docs = {d["_id"]: d async for d in db.bets.find({"_id": {"$in": [990001, 990002]}})}
+        await db.bets.delete_many({"_id": {"$in": [990001, 990002]}})
+        return docs
+
+    docs = asyncio.run(scenario())
+    assert docs[990001]["value"] == {"issue": "domicile", "cote": 3.35, "proba_pct": 38.3, "avantage_pct": 28.3}
+    assert "value" in docs[990002] and docs[990002]["value"] is None
+
+
 def test_bets_lists(api):
     pending = api.get("/api/bets").json()["paris"]
     settled = api.get("/api/bets", params={"statut": "regles"}).json()["paris"]
