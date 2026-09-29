@@ -165,6 +165,16 @@ soit 38 % de l'écart avec Pinnacle (0,968) comblé. Reproduire :
 `python -m tools.backtest_historique --xg`. Les xG sont rattachés aux matchs à chaque
 synchro complète (5 appels Understat ; les 2 saisons précédentes une seule fois).
 
+**Stats par écart de notes /100** : la page Stats montre aussi le résultat des matchs
+selon l'écart des notes globales que les deux équipes avaient avant le coup d'envoi
+(recalculées championnat par championnat et saison par saison, sur les seuls matchs
+antérieurs), séparé selon que la mieux notée joue à domicile ou à l'extérieur, la note
+ne tenant pas compte du terrain. La fiche d'un match à venir affiche la tranche qui lui
+correspond (`GET /api/stats/ecart-notes?domicile=78&exterieur=50`). Sur l'historique
+football-data.co.uk (19 085 matchs notés), la mieux notée gagne 37 % des matchs avec un
+écart de 0–5 et 70 % au-delà de 40 ; à écart de 0–10, jouer à l'extérieur la fait perdre
+plus souvent qu'elle ne gagne.
+
 ## Tests
 
 ```bash

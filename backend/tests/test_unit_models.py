@@ -13,7 +13,7 @@ from betting import (KELLY_CAP, clv_pct, kelly_fraction, match_fixture, settle_o
 from elo import (DEFAULT_LOGIT, fit_ordered_logit, fit_outcome_model, margin_multiplier,  # noqa: E402
                  outcome_probs, run_elo, xg_diff, xg_form)
 from player_ingest import build_team_map  # noqa: E402
-from scoring import compute_defensif, compute_offensif  # noqa: E402
+from scoring import compute_defensif, compute_offensif, pre_match_ratings, standings_positions  # noqa: E402
 from signals import _align_split, _poisson_probs, build_signals  # noqa: E402
 from teamnames import normalize_team_name  # noqa: E402
 
@@ -345,6 +345,56 @@ def test_defence_adjusted_for_opponent_strength_like_attack():
     vs_weak = [{"gf": 1, "gc": 2, "opponent_id": 11} for _ in range(5)]
     assert compute_defensif(vs_strong, pos_map)["score"] > compute_defensif(vs_weak, pos_map)["score"]
     assert compute_offensif(vs_strong, pos_map)["score"] > compute_offensif(vs_weak, pos_map)["score"]
+
+
+# ---------------------------------------------------------------------------
+# Notes /100 avant-match (stats par écart de notes) : pas de fuite de données
+# ---------------------------------------------------------------------------
+def test_pre_match_note_ignores_the_match_itself_and_later_ones():
+    matches = _random_league(seed=1)
+    ratings = pre_match_ratings(matches)
+    target = next(m for m in matches if m["match_id"] in ratings and m["utc_date"] < "2026-08-08")
+
+    altered = [dict(m) for m in matches]
+    for m in altered:
+        if m["match_id"] == target["match_id"] or m["utc_date"] > target["utc_date"]:
+            m["score"] = {"fullTime": {"home": 9, "away": 0}}
+    assert pre_match_ratings(altered)[target["match_id"]] == ratings[target["match_id"]]
+
+
+def test_pre_match_notes_require_min_history():
+    matches = _random_league(seed=2)
+    ratings = pre_match_ratings(matches, min_history=3)
+    rated_dates = {m["utc_date"] for m in matches if m["match_id"] in ratings}
+    # 3 journées complètes nécessaires avant la première note
+    assert min(rated_dates) == "2026-08-04T15:00:00Z"
+
+
+def test_random_league_better_note_not_inflated():
+    """Sur des résultats purement aléatoires, l'équipe « mieux notée » ne doit pas
+    gagner nettement plus qu'elle ne perd."""
+    v = d = 0
+    for seed in range(60):
+        matches = _random_league(seed)
+        ratings = pre_match_ratings(matches)
+        for m in matches:
+            if m["match_id"] not in ratings:
+                continue
+            rh, ra = ratings[m["match_id"]]
+            gh, ga = m["score"]["fullTime"]["home"], m["score"]["fullTime"]["away"]
+            if rh == ra or gh == ga:
+                continue
+            if (gh > ga) == (rh > ra):
+                v += 1
+            else:
+                d += 1
+    assert abs(v - d) / (v + d) < 0.1, (v, d)
+
+
+def test_standings_ties_share_average_rank():
+    pos = standings_positions({1: (6, 3, 4), 2: (3, 0, 2), 3: (3, 0, 2), 4: (0, -3, 0)})
+    assert pos == {1: (1, 4), 2: (2.5, 4), 3: (2.5, 4), 4: (4, 4)}
+    assert set(standings_positions({1: (0, 0, 0), 2: (0, 0, 0)}).values()) == {(1.5, 2)}
 
 
 # ---------------------------------------------------------------------------

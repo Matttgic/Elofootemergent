@@ -22,6 +22,120 @@ function TriBar({ a, b, c, labels }) {
   );
 }
 
+function GapList({ rows, prefix, unit, labels, fav }) {
+  return (
+    <div className="space-y-4">
+      {rows.map((b) => (
+        <div key={b.tranche} data-testid={`${prefix}-gap-${b.tranche}`}>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-sm font-semibold text-slate-200">Écart {b.tranche} {unit}</span>
+            <span className="text-xs text-slate-500 font-stat">{b.matchs} matchs</span>
+          </div>
+          {b.matchs > 0 ? (
+            <>
+              <TriBar a={b.favori_gagne_pct} b={b.nul_pct} c={b.outsider_gagne_pct} labels={labels} />
+              {b.scores_frequents?.length > 0 && (
+                <div className="mt-2.5" data-testid={`${prefix}-scores-${b.tranche}`}>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">
+                    Scores exacts fréquents <span className="text-slate-600">(vue {fav})</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {b.scores_frequents.map((s) => (
+                      <span key={s.score}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-slate-800/70 border border-slate-700 px-2 py-1"
+                        data-testid={`${prefix}-score-${b.tranche}-${s.score}`}>
+                        <span className="font-stat font-bold text-slate-100 text-sm tabular-nums">{s.score}</span>
+                        <span className="text-[11px] text-emerald-400 font-stat">{s.pct}%</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-xs text-slate-600">Pas assez de données</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const NOTE_LABELS = ["Mieux notée", "Nul", "Moins bien notée"];
+const VENUES = { tous: "Tous", domicile: "À domicile", exterieur: "À l'extérieur" };
+const VENUE_TEXT = { tous: "Tous terrains confondus", domicile: "Quand elle joue à domicile",
+                     exterieur: "Quand elle joue à l'extérieur" };
+const MIN_COMPARABLE = 20;
+
+// « Si une équipe notée 78 reçoit une équipe notée 50 » : tranche d'écart et terrain correspondants
+function NoteSimulator({ par }) {
+  const [dom, setDom] = useState("78");
+  const [ext, setExt] = useState("50");
+  const a = Number(dom), b = Number(ext);
+  const valid = dom !== "" && ext !== "" && a >= 0 && a <= 100 && b >= 0 && b <= 100;
+  const gap = Math.abs(a - b);
+  const venue = a > b ? "domicile" : "exterieur";
+  const row = valid && a !== b
+    ? par[venue].find((r) => gap >= r.min && (r.max === null || gap < r.max)) : null;
+  const input = (value, set, testid) => (
+    <input type="number" min="0" max="100" inputMode="numeric" value={value} data-testid={testid}
+      onChange={(e) => set(e.target.value.slice(0, 3))}
+      className="w-14 rounded-md bg-slate-900 border border-slate-700 px-2 py-1 text-center font-stat font-bold text-slate-100 focus:outline-none focus:border-cyan-500" />
+  );
+
+  return (
+    <div className="rounded-lg bg-slate-800/40 border border-slate-700/70 p-3 mb-4" data-testid="note-simulator">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 text-sm text-slate-300">
+        <span>Une équipe notée</span>{input(dom, setDom, "note-sim-home")}
+        <span>reçoit une équipe notée</span>{input(ext, setExt, "note-sim-away")}
+      </div>
+      <div className="mt-2.5 text-xs text-slate-400" data-testid="note-sim-result">
+        {!valid ? "Notes entre 0 et 100."
+          : a === b ? "Notes égales : aucune équipe n'est mieux notée."
+          : !row || row.matchs < MIN_COMPARABLE ? `Trop peu de matchs comparables (écart ${gap}, ${row?.matchs ?? 0} matchs).`
+          : (
+            <>
+              <div className="mb-2">
+                Écart de <b className="text-slate-200">{gap}</b>, l'équipe la mieux notée joue{" "}
+                <b className="text-slate-200">{venue === "domicile" ? "à domicile" : "à l'extérieur"}</b> :
+                sur <b className="text-slate-200">{row.matchs}</b> matchs comparables (écart {row.tranche}) :
+              </div>
+              <TriBar a={row.favori_gagne_pct} b={row.nul_pct} c={row.outsider_gagne_pct} labels={NOTE_LABELS} />
+            </>
+          )}
+      </div>
+    </div>
+  );
+}
+
+function NoteGaps({ notes }) {
+  const [venue, setVenue] = useState("tous");
+  const split = notes.mieux_notee[venue];
+  return (
+    <div data-testid="note-gaps">
+      <NoteSimulator par={notes.par_ecart} />
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <span className="text-xs text-slate-500">Terrain de la mieux notée :</span>
+        {Object.entries(VENUES).map(([k, label]) => (
+          <button key={k} onClick={() => setVenue(k)} data-testid={`note-venue-${k}`}
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+              venue === k ? "bg-cyan-500 text-slate-900" : "bg-slate-800/60 text-slate-400 hover:bg-slate-800"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-slate-400 mb-4" data-testid="note-venue-summary">
+        {VENUE_TEXT[venue]}, l'équipe la mieux notée gagne{" "}
+        <b className="text-emerald-400">{split.victoires_pct}%</b> des matchs, fait nul {split.nuls_pct}% et perd{" "}
+        {split.defaites_pct}% ({split.matchs} matchs).
+      </p>
+      <GapList rows={notes.par_ecart[venue]} prefix={`note-${venue}`} unit="pts de note"
+        labels={NOTE_LABELS} fav="de la mieux notée" />
+      <p className="text-[11px] text-slate-500 mt-4">{notes.note}</p>
+    </div>
+  );
+}
+
 function Money({ v }) {
   const pos = v > 0, neg = v < 0;
   return <span className={`font-stat font-bold tabular-nums ${pos ? "text-emerald-400" : neg ? "text-red-400" : "text-slate-300"}`}>
@@ -214,6 +328,7 @@ export default function Stats() {
   const [d, setD] = useState(null);
   const [sim, setSim] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [gapKind, setGapKind] = useState("note");
 
   useEffect(() => {
     api.get("/stats").then((r) => setD(r.data)).catch(() => setD(null)).finally(() => setLoading(false));
@@ -229,7 +344,7 @@ export default function Stats() {
         <PieChart className="w-7 h-7 text-emerald-400" /> Stats
       </h1>
       <p className="text-slate-400 text-sm mb-6">
-        Lien entre les notes Elo et les résultats réels · <b className="text-slate-200">{d.echantillon}</b> matchs
+        Lien entre les notes (Elo et note globale /100) et les résultats réels · <b className="text-slate-200">{d.echantillon}</b> matchs
         {d.echantillon_saison ? <> dont <b className="text-slate-200">{d.echantillon_saison}</b> cette saison</> : null}.
       </p>
 
@@ -245,7 +360,23 @@ export default function Stats() {
             labels={["Gagne", "Nul", "Perd"]} />
         </div>
 
-        <div className="card-surface rounded-xl p-5" data-testid="stat-home-advantage">
+        {d.notes?.disponible && (
+          <div className="card-surface rounded-xl p-5" data-testid="stat-better-note">
+            <div className="flex items-center gap-2 mb-3">
+              <TrendingUp className="w-5 h-5 text-cyan-400" />
+              <h3 className="font-head font-bold text-slate-100">Mieux notée (note /100)</h3>
+            </div>
+            <div className="text-3xl font-black font-stat text-cyan-400 mb-1">{d.notes.mieux_notee.tous.victoires_pct}%</div>
+            <p className="text-xs text-slate-500 mb-3">
+              de victoires pour l'équipe à la meilleure note globale (domicile {d.notes.mieux_notee.domicile.victoires_pct}%,
+              extérieur {d.notes.mieux_notee.exterieur.victoires_pct}%)
+            </p>
+            <TriBar a={d.notes.mieux_notee.tous.victoires_pct} b={d.notes.mieux_notee.tous.nuls_pct}
+              c={d.notes.mieux_notee.tous.defaites_pct} labels={["Gagne", "Nul", "Perd"]} />
+          </div>
+        )}
+
+        <div className="card-surface rounded-xl p-5 sm:col-span-2" data-testid="stat-home-advantage">
           <div className="flex items-center gap-2 mb-3">
             <HomeIcon className="w-5 h-5 text-emerald-400" />
             <h3 className="font-head font-bold text-slate-100">Avantage du terrain</h3>
@@ -260,46 +391,30 @@ export default function Stats() {
       <ModelQuality q={d.modele} />
 
       <div className="card-surface rounded-xl p-5" data-testid="stat-by-gap">
-        <div className="flex items-center gap-2 mb-4">
-          <Scale className="w-5 h-5 text-emerald-400" />
-          <h3 className="font-head font-bold text-slate-100">Résultat selon l'écart Elo</h3>
-        </div>
-        <div className="space-y-4">
-          {d.par_ecart_elo.map((b) => (
-            <div key={b.tranche} data-testid={`stat-gap-${b.tranche}`}>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-sm font-semibold text-slate-200">Écart {b.tranche} pts</span>
-                <span className="text-xs text-slate-500 font-stat">{b.matchs} matchs</span>
-              </div>
-              {b.matchs > 0 ? (
-                <>
-                  <TriBar a={b.favori_gagne_pct} b={b.nul_pct} c={b.outsider_gagne_pct}
-                    labels={["Favori", "Nul", "Outsider"]} />
-                  {b.scores_frequents?.length > 0 && (
-                    <div className="mt-2.5" data-testid={`stat-scores-${b.tranche}`}>
-                      <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">
-                        Scores exacts fréquents <span className="text-slate-600">(vue du favori)</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {b.scores_frequents.map((s) => (
-                          <span key={s.score}
-                            className="inline-flex items-center gap-1.5 rounded-md bg-slate-800/70 border border-slate-700 px-2 py-1"
-                            data-testid={`stat-score-${b.tranche}-${s.score}`}>
-                            <span className="font-stat font-bold text-slate-100 text-sm tabular-nums">{s.score}</span>
-                            <span className="text-[11px] text-emerald-400 font-stat">{s.pct}%</span>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-xs text-slate-600">Pas assez de données</p>
-              )}
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+          <div className="flex items-center gap-2">
+            <Scale className="w-5 h-5 text-emerald-400" />
+            <h3 className="font-head font-bold text-slate-100">Résultat selon l'écart</h3>
+          </div>
+          {d.notes?.disponible && (
+            <div className="flex rounded-lg bg-slate-800/60 p-0.5">
+              {[["elo", "Elo"], ["note", "Note /100"]].map(([k, label]) => (
+                <button key={k} onClick={() => setGapKind(k)} data-testid={`gap-kind-${k}`}
+                  className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
+                    gapKind === k ? "bg-emerald-500 text-white" : "text-slate-400 hover:text-slate-200"}`}>
+                  {label}
+                </button>
+              ))}
             </div>
-          ))}
+          )}
         </div>
-        <p className="text-[11px] text-slate-500 mt-4">{d.note}</p>
+        {gapKind === "note" && d.notes?.disponible ? <NoteGaps notes={d.notes} /> : (
+          <>
+            <GapList rows={d.par_ecart_elo} prefix="stat" unit="pts" labels={["Favori", "Nul", "Outsider"]}
+              fav="du favori" />
+            <p className="text-[11px] text-slate-500 mt-4">{d.note}</p>
+          </>
+        )}
       </div>
 
       <BetSimulation sim={sim} />

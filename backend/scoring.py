@@ -10,6 +10,7 @@ ils sont donc marqués "Donnée indisponible" et exclus des calculs, les
 coefficients restant documentés ci-dessous.
 """
 from datetime import datetime
+from itertools import groupby
 from zoneinfo import ZoneInfo
 
 # ---------------------------------------------------------------------------
@@ -18,6 +19,7 @@ from zoneinfo import ZoneInfo
 DECAY = 0.85          # poids d'un match = DECAY^k (k=0 => match le plus récent)
 MAX_MATCHES = 10      # fenêtre des matchs récents pris en compte
 GOALS_SCALE = 3.0     # 3 buts/match => 100 pts (borne haute réaliste)
+MIN_HISTORY = 3       # matchs antérieurs minimum pour noter une équipe avant un match (stats)
 
 GLOBAL_WEIGHTS = {"forme": 0.40, "difference_buts": 0.25, "offensif": 0.175, "defensif": 0.175}
 OFF_WEIGHTS = {"buts_par_match": 0.55, "regularite_offensive": 0.30, "forme_offensive_recente": 0.15}
@@ -200,6 +202,67 @@ def rate_global(recs, pos_map):
         return None
     return compute_global(recs, pos_map, compute_offensif(recs, pos_map),
                           compute_defensif(recs, pos_map), compute_forme(recs, pos_map))
+
+
+def standings_positions(table):
+    """pos_map {team_id: (position, total)} d'après {team_id: (points, diff, buts)}.
+    Les ex æquo partagent leur rang moyen (tous à 0 point => force neutre 0.5)."""
+    order = sorted(table, key=lambda t: table[t], reverse=True)
+    total = len(order)
+    pos_map, i = {}, 0
+    while i < total:
+        j = i
+        while j + 1 < total and table[order[j + 1]] == table[order[i]]:
+            j += 1
+        for t in order[i:j + 1]:
+            pos_map[t] = ((i + j) / 2 + 1, total)
+        i = j + 1
+    return pos_map
+
+
+def pre_match_ratings(matches, min_history=MIN_HISTORY):
+    """Notes globales des deux équipes AVANT chaque match terminé, sans fuite.
+
+    Chaque match n'est noté qu'avec les matchs terminés strictement antérieurs à
+    son coup d'envoi, et la force des adversaires vient d'un classement
+    reconstitué à partir de ces seuls matchs. Retourne {match_id: (note_dom,
+    note_ext)} pour les matchs où chaque équipe a au moins `min_history` matchs
+    antérieurs.
+    """
+    table, history, finished = {}, {}, []
+    for m in matches:
+        ids = [(m.get(side) or {}).get("id") for side in ("home_team", "away_team")]
+        for tid in ids:
+            if tid is not None:
+                table[tid] = (0, 0, 0)
+                history[tid] = []
+        ft = (m.get("score") or {}).get("fullTime") or {}
+        if (m.get("status") == "FINISHED" and m.get("utc_date") and None not in ids
+                and ft.get("home") is not None and ft.get("away") is not None):
+            finished.append(m)
+    finished.sort(key=lambda m: m["utc_date"])
+
+    out = {}
+    for _, group in groupby(finished, key=lambda m: m["utc_date"]):
+        group = list(group)
+        pos_map = standings_positions(table)
+        for m in group:
+            hid, aid = m["home_team"]["id"], m["away_team"]["id"]
+            if len(history[hid]) < min_history or len(history[aid]) < min_history:
+                continue
+            rh = rate_global(extract_records(history[hid], hid), pos_map)
+            ra = rate_global(extract_records(history[aid], aid), pos_map)
+            if rh and ra:
+                out[m["match_id"]] = (rh["score"], ra["score"])
+        # les matchs de ce créneau ne comptent que pour les créneaux suivants
+        for m in group:
+            hid, aid = m["home_team"]["id"], m["away_team"]["id"]
+            gh, ga = m["score"]["fullTime"]["home"], m["score"]["fullTime"]["away"]
+            for tid, gf, gc in ((hid, gh, ga), (aid, ga, gh)):
+                pts, diff, buts = table[tid]
+                table[tid] = (pts + (3 if gf > gc else 1 if gf == gc else 0), diff + gf - gc, buts + gf)
+                history[tid].append(m)
+    return out
 
 
 def _basic_stats(recs):

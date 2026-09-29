@@ -104,6 +104,17 @@ def test_stats_global(s):
     assert len(pcts) >= 3
     print("favori_gagne_pct par tranche (matchs>=5):", pcts)
     assert pcts[0] < pcts[-1], f"Not monotonic: {pcts}"
+    # Même lecture avec l'écart des notes /100 (terrain de la mieux notée séparé)
+    notes = d["notes"]
+    assert notes["disponible"] is True
+    for venue in ("tous", "domicile", "exterieur"):
+        par = notes["par_ecart"][venue]
+        assert [b["tranche"] for b in par][-1] == "40+"
+    pcts = [b["favori_gagne_pct"] for b in notes["par_ecart"]["tous"] if b["matchs"] >= 30]
+    assert len(pcts) >= 3 and pcts[0] < pcts[-1], f"Not monotonic: {pcts}"
+    # une équipe mieux notée gagne plus souvent à domicile qu'à l'extérieur
+    split = notes["mieux_notee"]
+    assert split["domicile"]["victoires_pct"] > split["exterieur"]["victoires_pct"]
 
 
 def test_stats_pl_only(s):
