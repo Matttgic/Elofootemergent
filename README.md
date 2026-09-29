@@ -86,7 +86,8 @@ en arrière-plan (quelques minutes, à cause de la limite de 10 requêtes/min).
 | Base de données | MongoDB Atlas, cluster M0 (512 Mo, largement suffisant) | — |
 | Synchronisations planifiées | GitHub Actions (~900 min/mois sur les 2 000 gratuites d'un dépôt privé) | `.github/workflows/sync.yml` |
 
-1. **MongoDB Atlas** : créer un cluster M0, un utilisateur de base de données, et autoriser
+1. **MongoDB Atlas** : créer un cluster M0 (région AWS Frankfurt `eu-central-1`, comme
+   l'API Render), un utilisateur de base de données, et autoriser
    l'accès réseau depuis `0.0.0.0/0` (Render et GitHub Actions n'ont pas d'IP fixe).
    Récupérer la chaîne de connexion `mongodb+srv://…`.
 2. **Render** : *New > Blueprint*, choisir ce dépôt (`render.yaml` est détecté). Renseigner
