@@ -44,7 +44,9 @@ Synchronisation automatique (UTC) : rafraîchissement léger des résultats chaq
 hh:05 (1 appel API), analyse complète chaque jour à 04:30 (saison, classements, joueurs,
 cotes). Elle tourne dans l'API (APScheduler) ou, sur un hébergement qui se met en veille,
 dans GitHub Actions via `python -m jobs light|full`. Les analyses d'équipes sont mises en
-cache 10 min et recalculées après chaque synchronisation.
+cache 10 min et recalculées après chaque synchronisation. Filet de sécurité : si la
+dernière synchro a plus de 2 h (cron GitHub en retard), l'API lance d'elle-même un
+rafraîchissement léger à son réveil ou à la consultation de l'accueil.
 
 ## Configuration
 
@@ -57,7 +59,7 @@ cache 10 min et recalculées après chaque synchronisation.
 | `ODDS_API_KEY` | active la prise de paris simulés sur cotes réelles |
 | `COMPETITIONS` | codes séparés par des virgules (défaut : les 12 compétitions gratuites) |
 | `CORS_ORIGINS` | origines autorisées, séparées par des virgules (défaut `*`) |
-| `SCHEDULER_ENABLED` | `false` pour couper les synchros internes (hébergement qui se met en veille) |
+| `SCHEDULER_ENABLED` | `false` pour couper le planificateur interne (hébergement qui se met en veille) ; le rattrapage léger des données de plus de 2 h reste actif |
 
 `frontend/.env` (modèle : `frontend/.env.example`) : `REACT_APP_BACKEND_URL` (URL du backend, sans `/api`).
 
@@ -122,7 +124,9 @@ adresses séparées par des virgules), sinon le site s'affiche sans données.
    sur Render.
 
 Limites à connaître : l'API Render gratuite se met en veille après 15 min sans visite
-(premier chargement ~30-60 s) ; les analyses se rafraîchissent au plus 10 min après
+(premier chargement ~30-60 s, signalé sur le site par un bandeau « Réveil du serveur ») ;
+les tâches planifiées GitHub peuvent avoir du retard, voire être sautées aux heures
+chargées (le rattrapage automatique ci-dessus compense) ; les analyses se rafraîchissent au plus 10 min après
 chaque synchronisation (cache de l'API) ; GitHub suspend les workflows planifiés d'un
 dépôt sans aucune activité pendant 60 jours (les réactiver dans l'onglet *Actions*).
 

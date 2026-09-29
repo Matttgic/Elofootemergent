@@ -1,9 +1,10 @@
 """Point d'entrée FastAPI (uvicorn server:app) : application, CORS, planification
 des synchronisations et démarrage. Les routes sont dans routers/.
 
-SCHEDULER_ENABLED=false désactive les synchronisations internes (planificateur et
-rattrapage au démarrage), pour un hébergement qui se met en veille : elles sont
-alors lancées de l'extérieur avec `python -m jobs light|full` (voir README)."""
+SCHEDULER_ENABLED=false désactive le planificateur interne, pour un hébergement qui
+se met en veille : les synchronisations sont alors lancées de l'extérieur avec
+`python -m jobs light|full` (voir README). Seul subsiste un rattrapage léger si
+les données ont plus de 2 h (au réveil de l'API ou à la consultation du statut)."""
 import asyncio
 import logging
 import os
@@ -15,7 +16,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from core import client, db
 from football_client import get_token
-from jobs import ensure_indexes, run_full_guarded, run_light_guarded
+from jobs import catch_up_if_stale, ensure_indexes, run_full_guarded, run_light_guarded
 from routers import matches, players, stats
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,8 @@ async def _startup_ingest():
 async def on_startup():
     await ensure_indexes()
     if not scheduler_enabled():
-        logger.info("Synchronisations internes désactivées (SCHEDULER_ENABLED=false).")
+        logger.info("Planificateur interne désactivé (SCHEDULER_ENABLED=false).")
+        await catch_up_if_stale()
         return
     await _startup_ingest()
     # Rafraîchissement léger fréquent (1 appel API) pour les résultats + notes

@@ -10,6 +10,7 @@ import PlayerPage from "./pages/PlayerPage";
 import Search from "./pages/Search";
 import Methodologie from "./pages/Methodologie";
 import { Toaster } from "./components/ui/sonner";
+import { ServerWakeBanner } from "./components/ServerWakeBanner";
 
 function App() {
   return (
@@ -31,6 +32,7 @@ function App() {
           Les signaux sont indicatifs et ne constituent en aucun cas des prédictions certaines.
         </footer>
       </BrowserRouter>
+      <ServerWakeBanner />
       <Toaster />
     </div>
   );

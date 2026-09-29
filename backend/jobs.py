@@ -10,10 +10,11 @@ import asyncio
 import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from analytics import invalidate_caches
 from core import client, db
+from football_client import get_token
 from ingest import run_ingest, run_light_ingest
 from routers.stats import settle_bets, snapshot_bets
 
@@ -21,6 +22,12 @@ logger = logging.getLogger(__name__)
 
 # État de synchronisation (évite les ingestions concurrentes manuel/planifié)
 ingest_state = {"running": False, "started_at": None}
+
+# Rattrapage si la synchro externe (cron GitHub, parfois en retard) n'est pas passée
+CATCH_UP_AFTER = timedelta(hours=2)
+CATCH_UP_RETRY = timedelta(minutes=30)
+_catch_up = {"last_attempt": None}
+_background = set()   # références des tâches lancées (évite leur ramasse-miettes)
 
 
 async def _guarded(factory):
@@ -53,6 +60,28 @@ async def run_light_guarded():
     except Exception as e:  # noqa: BLE001
         logger.error("Règlement paris (light) échec: %s", e)
     return res
+
+
+async def catch_up_if_stale():
+    """Filet de sécurité : si la dernière synchro date de plus de CATCH_UP_AFTER,
+    lance un rafraîchissement léger (1 appel API) en arrière-plan. Au plus une
+    tentative par CATCH_UP_RETRY et par processus. Retourne True si lancé."""
+    now = datetime.now(timezone.utc)
+    last = _catch_up["last_attempt"]
+    if not get_token() or ingest_state["running"] or (last and now - last < CATCH_UP_RETRY):
+        return False
+    sync = await db.meta.find_one({"_id": "sync"}, {"last_sync": 1})
+    try:
+        if now - datetime.fromisoformat(sync["last_sync"]) < CATCH_UP_AFTER:
+            return False
+    except (TypeError, KeyError, ValueError):
+        pass   # jamais synchronisé ou date illisible : on rattrape
+    _catch_up["last_attempt"] = now
+    logger.info("Données périmées — rafraîchissement léger de rattrapage.")
+    task = asyncio.create_task(run_light_guarded())
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+    return True
 
 
 async def ensure_indexes():
