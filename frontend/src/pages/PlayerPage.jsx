@@ -5,6 +5,7 @@ import { ScoreBadge } from "../components/ScoreBadge";
 import { ScoreBar } from "../components/ScoreBar";
 import { ScoreBreakdown } from "../components/ScoreBreakdown";
 import { DataUnavailable } from "../components/DataUnavailable";
+import { TeamLogo } from "../components/TeamLogo";
 import { Skeleton } from "../components/ui/skeleton";
 import { frDate, resultColor } from "../lib/format";
 import { ArrowLeft } from "lucide-react";
@@ -37,7 +38,11 @@ export default function PlayerPage() {
         </ScoreBreakdown>
         <div className="min-w-0">
           <h1 className="font-head text-2xl font-extrabold text-slate-50 truncate">{p.nom}</h1>
-          <div className="text-sm text-slate-400">{p.poste} · {p.team_title} · {p.competition_nom}</div>
+          <div className="text-sm text-slate-400 flex items-center gap-1.5 flex-wrap">
+            <span>{p.poste} ·</span>
+            <TeamLogo src={p.team_logo} className="w-5 h-5" />
+            <span>{p.team_title} · {p.competition_nom}</span>
+          </div>
         </div>
       </div>
 

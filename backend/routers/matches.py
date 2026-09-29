@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
-from analytics import calibration, compact, comp_data, match_summary, stats_analytics
+from analytics import calibration, compact, comp_data, match_summary, stats_analytics, team_logos
 from core import db
 from football_client import get_token
 from ingest import COMPETITION_META, configured_codes, is_cup
@@ -254,10 +254,12 @@ async def search(q: str = Query(..., min_length=2)):
     pdocs = await db.players.find({"nom": {"$regex": re.escape(q), "$options": "i"}}, {"_id": 0}).to_list(60)
     pdocs.sort(key=lambda d: d.get("minutes", 0), reverse=True)
     joueurs = []
+    logos = await team_logos(d["competition_code"] for d in pdocs[:20])
     for d in pdocs[:20]:
         a = analyze_player(d)
         joueurs.append({"player_id": a["player_id"], "nom": a["nom"], "poste": a["poste"],
                         "team_title": a["team_title"], "competition_code": d["competition_code"],
+                        "team_logo": logos.get((d["competition_code"], d.get("team_id"))),
                         "competition_nom": COMPETITION_META.get(d["competition_code"], {}).get("nom"),
                         "score": a["scores"]["global"]["score"]})
     message = None if joueurs else ("Aucun joueur trouvé (couverture : 5 grands championnats "

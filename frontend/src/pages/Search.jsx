@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { DataUnavailable } from "../components/DataUnavailable";
+import { TeamLogo } from "../components/TeamLogo";
 import { Skeleton } from "../components/ui/skeleton";
 import { SearchX } from "lucide-react";
 
@@ -50,6 +51,7 @@ export default function Search() {
               {res.joueurs.resultats.map((p) => (
                 <div key={p.player_id} data-testid={`search-player-${p.player_id}`}
                   className="card-surface rounded-xl p-3 flex items-center gap-3">
+                  {p.team_logo ? <TeamLogo src={p.team_logo} className="w-9 h-9" /> : <div className="w-9 h-9 rounded bg-slate-800 shrink-0" />}
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold text-slate-100 text-sm truncate">{p.nom}</div>
                     <div className="text-xs text-slate-500">{p.poste} · {p.team_title} · {p.competition_nom}</div>

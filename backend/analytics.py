@@ -99,6 +99,16 @@ async def comp_data(code):
     return await _cached(_comp_cache, code, load)
 
 
+async def team_logos(codes):
+    """{(code, team_id): url du logo} pour les championnats donnés (données en cache)."""
+    logos = {}
+    for c in set(codes):
+        for tid, t in (await comp_data(c)).meta.items():
+            if t.get("crest"):
+                logos[(c, tid)] = t["crest"]
+    return logos
+
+
 def compact(analysis):
     if not analysis:
         return None
