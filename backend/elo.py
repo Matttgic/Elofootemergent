@@ -414,12 +414,13 @@ def elo_config():
                         "ajusté sur les matchs passés : pour un écart Elo donné, il reproduit la fréquence "
                         "observée de chaque issue. Les scores probables suivent une loi de Poisson dont la "
                         "répartition des buts est alignée sur ces probabilités.",
-        "xg": "Dans les 5 grands championnats, le modèle ajoute la forme xG de chaque équipe : "
-              "la différence entre les expected goals (xG, qualité des occasions, source Understat) "
-              f"créés et concédés, moyennée sur ses derniers matchs (demi-vie de {XG_HALF_LIFE} matchs). "
-              "Les xG mesurent la domination mieux que le score, souvent décidé par peu d'occasions. "
-              f"Il faut au moins {XG_MIN_MATCHES} matchs avec xG pour chaque équipe ; sinon, ou hors "
-              "de ces championnats, seul l'Elo est utilisé.",
+        "xg": "Dans les championnats suivis, le modèle ajoute la forme xG de chaque équipe : "
+              "la différence entre les expected goals (xG, qualité des occasions) créés et concédés, "
+              f"moyennée sur ses derniers matchs (demi-vie de {XG_HALF_LIFE} matchs). Sources : Understat "
+              "pour les 5 grands championnats ; FotMob (données Opta) pour le Portugal, les Pays-Bas, le "
+              "Championship et le Brésil. Les xG mesurent la domination mieux que le score, souvent décidé "
+              f"par peu d'occasions. Il faut au moins {XG_MIN_MATCHES} matchs avec xG pour chaque équipe ; "
+              "sinon (début de saison, promus, coupes), seul l'Elo est utilisé.",
         "value": "Une « value » signale une issue dont la probabilité estimée dépasse d'au moins 5 % celle "
                  "qu'implique la cote du bookmaker. Sur l'historique, ces écarts n'ont pas été rentables : "
                  "les bookmakers restent plus précis que le modèle.",
