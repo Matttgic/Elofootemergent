@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { Activity, Search, Trophy, BarChart3, BookOpen, PieChart } from "lucide-react";
+import { Activity, Search, Trophy, BarChart3, BookOpen, PieChart, GitCompareArrows } from "lucide-react";
 import { Input } from "../components/ui/input";
 
 export function Header() {
@@ -17,6 +17,7 @@ export function Header() {
     { to: "/", label: "Matchs", icon: Activity },
     { to: "/classements", label: "Classements", icon: Trophy },
     { to: "/stats", label: "Stats", icon: PieChart },
+    { to: "/comparer", label: "Comparer", icon: GitCompareArrows },
     { to: "/methodologie", label: "Méthode", icon: BookOpen },
   ];
 
@@ -58,12 +59,12 @@ export function Header() {
         </form>
       </div>
 
-      <nav className="md:hidden flex items-center gap-1 px-3 pb-2 -mt-1">
+      <nav className="md:hidden flex items-center gap-1 px-3 pb-2 -mt-1 overflow-x-auto">
         {links.map((l) => {
           const active = loc.pathname === l.to;
           return (
             <Link key={l.to} to={l.to} data-testid={`nav-mobile-${l.label.toLowerCase()}`}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
                 active ? "text-emerald-400 bg-emerald-500/10" : "text-slate-400 hover:text-slate-100"}`}>
               <l.icon className="w-3.5 h-3.5" />{l.label}
             </Link>

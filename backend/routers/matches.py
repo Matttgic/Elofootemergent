@@ -233,6 +233,42 @@ async def team(code: str, team_id: int):
             "elo_historique": [{"date": d, "elo": e} for d, e in hist]}
 
 
+def _team_key(value):
+    """« PL-57 » -> ("PL", 57)."""
+    code, _, tid = (value or "").partition("-")
+    if not tid.isdigit():
+        raise HTTPException(422, "Équipe attendue au format CODE-id, par exemple PL-57")
+    return code.upper(), int(tid)
+
+
+@router.get("/compare")
+async def compare(a: str, b: str):
+    """Deux équipes côte à côte (« CODE-id ») : Elo, notes /100, statistiques et
+    probabilités 1N2 selon le terrain, confrontations directes."""
+    eld = await elo_data()
+    teams = []
+    for value in (a, b):
+        code, tid = _team_key(value)
+        analysis = (await comp_data(code)).team(tid)
+        if not analysis:
+            raise HTTPException(404, f"Équipe introuvable : {value}")
+        teams.append((code, tid, analysis))
+    out = {}
+    for key, (code, tid, an) in zip(("a", "b"), teams):
+        out[key] = {**compact(an), "competition_code": code,
+                    "competition_nom": COMPETITION_META.get(code, {}).get("nom"),
+                    "elo": eld.team(tid), "stats": an.get("stats"),
+                    "elo_historique": [{"date": d, "elo": e} for d, e in eld.history.get(tid, [])[-80:]]}
+    (_, ia, ta), (_, ib, tb) = teams
+    out["a_recoit"] = prediction(eld, {"home_team": {"id": ia}, "away_team": {"id": ib}}, ta["nom_court"], tb["nom_court"])
+    out["b_recoit"] = prediction(eld, {"home_team": {"id": ib}, "away_team": {"id": ia}}, tb["nom_court"], ta["nom_court"])
+    pair = {"home_team.id": {"$in": [ia, ib]}, "away_team.id": {"$in": [ia, ib]}}
+    both = (await db.matches.find(pair, {"_id": 0}).to_list(50)
+            + await db.matches_history.find(pair, {"_id": 0}).to_list(50))
+    out["confrontations"] = head_to_head(both, ia, ib)
+    return out
+
+
 @router.get("/leaderboard/teams")
 async def leaderboard_teams(code: str | None = None, tri: str = "elo"):
     """Classement des équipes par Elo (défaut) ou par note /100 (`tri=note`)."""

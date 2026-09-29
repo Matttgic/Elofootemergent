@@ -165,8 +165,18 @@ pytest
 ```
 
 Le workflow GitHub **Tests** (`.github/workflows/tests.yml`) lance automatiquement, sur
-chaque PR et chaque push sur `main`, ces tests hors ligne et le build de production du
-frontend (avec `CI=true`, comme sur Vercel).
+chaque PR et chaque push sur `main`, ces tests hors ligne, le build de production du
+frontend (avec `CI=true`, comme sur Vercel) et des parcours dans un vrai navigateur.
+
+Tests navigateur (`e2e/`, Playwright) : le site compilé face à une API simulée (données
+des tests hors ligne, sans réseau) — accueil, fiche match, fiche équipe, classements,
+stats, méthodologie, recherche, comparateur et bandeau de réveil du serveur.
+
+```bash
+cd backend && pip install -r requirements-dev.txt
+cd ../frontend && REACT_APP_BACKEND_URL=http://127.0.0.1:8765 yarn build
+cd ../e2e && npm ci && npx playwright install chromium && npx playwright test
+```
 
 - `tests/test_unit_models.py` : Elo et probabilités 1N2, notation, paris, noms d'équipe (hors ligne).
 - `tests/test_api_offline.py` : tous les endpoints sur une base MongoDB simulée (hors ligne).

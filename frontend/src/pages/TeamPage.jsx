@@ -8,7 +8,7 @@ import { DataUnavailable } from "../components/DataUnavailable";
 import { FormChips } from "../components/FormChips";
 import { frDate, frDateShort, resultColor } from "../lib/format";
 import { Skeleton } from "../components/ui/skeleton";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, GitCompareArrows } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 export default function TeamPage() {
@@ -48,6 +48,10 @@ export default function TeamPage() {
               <span className="text-slate-600"> · {t.elo.matchs} matchs notés</span>
             </div>
           )}
+          <Link to={`/comparer?a=${code}-${t.team_id}`} data-testid="team-compare-link"
+            className="inline-flex items-center gap-1 mt-2 text-xs text-emerald-400 hover:text-emerald-300">
+            <GitCompareArrows className="w-3.5 h-3.5" /> Comparer avec une autre équipe
+          </Link>
         </div>
         <ScoreBreakdown data={t.global} title="Score global" team={t.nom_court}>
           <button><ScoreBadge score={t.global?.score} size="lg" /></button>
