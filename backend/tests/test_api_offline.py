@@ -162,8 +162,11 @@ def test_players(api):
     lb = api.get("/api/leaderboard/players", params={"tri": "buteurs"}).json()
     buts = [p["stats"]["buts"] for p in lb["joueurs"]]
     assert lb["disponible"] and buts == sorted(buts, reverse=True)
+    # logo de l'équipe fourni avec chaque joueur (données football-data de son équipe)
+    assert all(pl["team_logo"] == f"https://crests.example/{pl['team_id']}.png" for pl in lb["joueurs"])
     p = api.get("/api/player/100").json()
     assert p["forme_recente"]["form_score"]["score"] == 55
+    assert p["team_logo"] == f"https://crests.example/{p['team_id']}.png"
     assert api.get("/api/player/nope").status_code == 404
     assert set(api.post("/api/players/form", json={"ids": ["100", "fm1", "x"]}).json()) == {"100"}
     assert api.post("/api/players/form", json={"ids": "100"}).status_code == 422
@@ -172,7 +175,9 @@ def test_players(api):
 def test_search_and_config(api):
     s = api.get("/api/search", params={"q": "man"}).json()
     assert {e["nom_court"] for e in s["equipes"]} == {"Manchester City", "Manchester United"}
-    assert api.get("/api/search", params={"q": "Joueur 1"}).json()["joueurs"]["disponible"] is True
+    found = api.get("/api/search", params={"q": "Joueur 1"}).json()["joueurs"]
+    assert found["disponible"] is True
+    assert all(j["team_logo"].startswith("https://crests.example/") for j in found["resultats"])
     conf = api.get("/api/scoring/config").json()
     assert {"equipes", "joueurs"} == set(conf)
 

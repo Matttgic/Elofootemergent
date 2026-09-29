@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 
+from analytics import team_logos
 from core import db
 from fotmob_client import FOTMOB_LEAGUES, fetch_player_recent
 from ingest import COMPETITION_META
@@ -78,8 +79,10 @@ async def leaderboard_players(code: str | None = None, tri: str = "global",
     if not docs:
         return {"disponible": False, "message": "Données joueurs pas encore synchronisées."}
     players = [analyze_player(d) for d in docs]
+    logos = await team_logos(codes)
     for p, d in zip(players, docs):
         p["competition_nom"] = COMPETITION_META.get(d["competition_code"], {}).get("nom")
+        p["team_logo"] = logos.get((d["competition_code"], d.get("team_id")))
     if poste and poste != "Tous":
         players = [p for p in players if p["poste"] == poste]
     if tri == "buteurs":
@@ -98,6 +101,7 @@ async def player(player_id: str):
         raise HTTPException(404, "Joueur introuvable")
     a = analyze_player(d)
     a["competition_nom"] = COMPETITION_META.get(d["competition_code"], {}).get("nom")
+    a["team_logo"] = (await team_logos([d["competition_code"]])).get((d["competition_code"], d.get("team_id")))
     a["forme_recente"] = await get_player_form(player_id)
     return a
 

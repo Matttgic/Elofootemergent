@@ -2,6 +2,7 @@ import { ScoreBadge } from "./ScoreBadge";
 import { ScoreBar } from "./ScoreBar";
 import { ScoreBreakdown } from "./ScoreBreakdown";
 import { Link } from "react-router-dom";
+import { TeamLogo } from "./TeamLogo";
 
 const Poste = ({ poste }) => (
   <span className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">{poste}</span>
@@ -20,6 +21,7 @@ export function PlayerRow({ player, rank, metric = "global", testid }) {
         <div className="font-semibold text-slate-100 text-sm truncate">{player.nom}</div>
         <div className="flex items-center gap-2 mt-0.5">
           <Poste poste={player.poste} />
+          <TeamLogo src={player.team_logo} />
           <span className="text-[11px] text-slate-500 truncate">{player.team_title}</span>
         </div>
       </div>
