@@ -45,9 +45,10 @@ test("fiche match puis fiche équipe : Elo, cotes et courbe d'évolution", async
   await expect(page.getByTestId("xg-note")).toContainText("Forme xG");   // modèle Elo + xG
   await expect(page.getByTestId("prediction-panel")).toContainText("Modèle Elo + xG");
   await expect(page.getByTestId("detail-odds")).toBeVisible();
+  await expect(page.getByTestId("teams-compare")).toContainText("Force Elo");
   await page.getByTestId("team-link-home").click();
   await expect(page.getByTestId("team-elo")).toContainText("Elo");
-  await expect(page.getByTestId("team-xg")).toContainText("forme xG");
+  await expect(page.getByTestId("team-xg")).toContainText("Forme xG");
   await expect(page.getByTestId("team-elo-chart").locator(".recharts-line path").first()).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -80,11 +81,20 @@ test("classements : équipes triées par Elo puis par note, buteurs avec logos",
   expect(errors).toEqual([]);
 });
 
-test("stats : qualité du modèle, avertissement et paris suivis", async ({ page }) => {
+test("stats : classement des méthodes, fiabilité, écarts et paris", async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto("/stats");
+  // la meilleure méthode du site est mise en avant, avec son indice
+  await expect(page.getByTestId("method-ranking-site")).toContainText("Pronostic FootPulse");
+  await expect(page.getByTestId("stat-ranking-summary")).toContainText("indice 86");
+  // onglet « Fiabilité » (par défaut)
   await expect(page.getByTestId("stat-model-quality")).toBeVisible();
-  // écart de notes /100 (affiché par défaut) puis écart Elo
+  await expect(page.getByTestId("quality-calibration").locator("tbody tr").first()).toBeVisible();
+  await expect(page.getByTestId("quality-note-note")).toContainText("Note /100 seule");
+  // onglet « Résultats par écart » : Elo par défaut, puis forme /100
+  await page.getByTestId("stats-tab-ecarts").click();
+  await expect(page.getByTestId("stat-gap-200+")).toBeVisible();
+  await page.getByTestId("gap-kind-note").click();
   await expect(page.getByTestId("stat-better-note")).toContainText("Mieux notée");
   await expect(page.getByTestId("note-tous-gap-40+")).toBeVisible();
   await page.getByTestId("note-venue-domicile").click();
@@ -96,10 +106,8 @@ test("stats : qualité du modèle, avertissement et paris suivis", async ({ page
   await expect(page.getByTestId("note-sim-result")).toContainText("écart 5–10");
   await page.getByTestId("note-sim-away").fill("60");
   await expect(page.getByTestId("note-sim-result")).toContainText("Notes égales");
-  await page.getByTestId("gap-kind-elo").click();
-  await expect(page.getByTestId("stat-gap-200+")).toBeVisible();
-  await expect(page.getByTestId("quality-calibration").locator("tbody tr").first()).toBeVisible();
-  await expect(page.getByTestId("quality-note-note")).toContainText("Note /100 seule");
+  // onglet « Paris simulés »
+  await page.getByTestId("stats-tab-paris").click();
   await expect(page.getByTestId("sim-backtest-warning")).toContainText("13 273");
   await expect(page.getByTestId("bets-rows-en_attente").locator("a")).toHaveCount(10);
   await page.getByTestId("bets-tab-regles").click();
@@ -110,6 +118,8 @@ test("stats : qualité du modèle, avertissement et paris suivis", async ({ page
 test("méthodologie et recherche", async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto("/methodologie");
+  await expect(page.getByTestId("methodo-ranking-table").locator("tbody tr")).toHaveCount(6);
+  await expect(page.getByTestId("methodo-method-ranking-site")).toContainText("Pronostic FootPulse");
   await expect(page.getByTestId("methodo-backtest").locator("table").first().locator("tbody tr")).toHaveCount(5);
   await expect(page.getByTestId("methodo-backtest-xg").locator("tbody tr")).toHaveCount(4);
   await expect(page.getByTestId("methodo-backtest-notes").locator("tbody tr")).toHaveCount(7);

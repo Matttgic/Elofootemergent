@@ -139,6 +139,28 @@ planifie alors elle-même les synchronisations et le workflow GitHub peut être 
 
 ## Modèle et backtest
 
+**Classement des méthodes** (mis en avant sur les pages Stats et Méthode) : toutes les
+méthodes sur les mêmes 7 144 matchs des 5 grands championnats (2021-22 à 2026-27, xG,
+notes et cotes disponibles). Indice de précision : 0 = simples fréquences, 100 = Pinnacle.
+
+| Méthode | Indice | Log-loss | Brier | Réussite |
+| --- | --- | --- | --- | --- |
+| Cotes Pinnacle à la clôture | 100 | 0,9673 | 0,5750 | 54,3 % |
+| Cotes Bet365 avant-match | 98 | 0,9699 | 0,5767 | 53,9 % |
+| **Pronostic FootPulse (Elo + xG, site)** | **86** | **0,9824** | **0,5851** | **52,9 %** |
+| Elo seul | 77 | 0,9915 | 0,5914 | 52,5 % |
+| Note de forme /100 | 49 | 1,0221 | 0,6128 | 49,8 % |
+| Simples fréquences | 0 | 1,0739 | 0,6499 | 43,7 % |
+
+Reproduire : `python -m tools.backtest_historique --classement`.
+
+**Pistes testées sans gain** (même échantillon, écart de log-loss avec le modèle du site) :
+Elo ramené vers la moyenne en début de saison (0 à +0,0001), probabilité de nul selon le
+total de buts ou d'xG récents (−0,0003), écart de jours de repos (0), mélange avec les cotes
+Bet365 (0,9704 : mieux que le modèle, moins bien que Bet365 seul, qui contient déjà tout ce
+que sait le modèle). Les gains restants demandent des données que le modèle n'a pas encore :
+xG des autres championnats, absences et compositions.
+
 Les probabilités 1N2 viennent d'un classement **Elo** (K = 20, avantage du terrain de 60
 points, marge de buts prise en compte) calculé sur toutes les compétitions et sur les deux
 saisons précédentes (chargées une fois depuis football-data.org), puis d'un modèle
@@ -149,7 +171,7 @@ championnats (2021-22 à 2026-27, chaque saison prédite sans regarder l'avenir)
 | --- | --- | --- |
 | Fréquences domicile / nul / extérieur | 1,073 | 43,7 % |
 | Ancienne note /100 (tranches d'écart) | 1,038 | 47,8 % |
-| **Elo (site)** | **0,990** | **51,8 %** |
+| **Elo** | **0,990** | **51,8 %** |
 | Bet365 avant-match | 0,971 | 53,3 % |
 | Pinnacle à la clôture | 0,967 | 53,5 % |
 
@@ -180,7 +202,7 @@ plus souvent qu'elle ne gagne.
 | Méthode | Log-loss | Brier | Réussite |
 | --- | --- | --- | --- |
 | Note /100 seule (écart des notes globales) | 1,0220 | 0,6126 | 49,1 % |
-| **Elo seul (site)** | **0,9915** | **0,5916** | **51,7 %** |
+| **Elo seul** | **0,9915** | **0,5916** | **51,7 %** |
 | Elo + note /100 | 0,9912 | 0,5915 | 51,8 % |
 | Elo + note globale, attaque, défense, forme | 0,9909 | 0,5912 | 52,0 % |
 | Pinnacle à la clôture | 0,9697 | 0,5770 | 53,4 % |

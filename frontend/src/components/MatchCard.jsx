@@ -1,23 +1,23 @@
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ScoreBadge } from "./ScoreBadge";
-import { ScoreBar } from "./ScoreBar";
 import { FormChips } from "./FormChips";
 import { DataUnavailable } from "./DataUnavailable";
-import { ProbabilityBar, OddsLine, ValueBadge } from "./Probabilities";
+import { OddsLine, ValueBadge } from "./Probabilities";
+import { ForecastNumbers, MODEL_NAME } from "./Forecast";
 import { kickoff } from "../lib/format";
 import { ChevronRight } from "lucide-react";
 
-function TeamRow({ team, side }) {
+function TeamRow({ team, align = "left" }) {
   if (!team) return <div className="text-sm text-slate-500 py-2">Équipe inconnue</div>;
+  const right = align === "right";
   return (
-    <div className="flex items-center gap-3 min-w-0">
+    <div className={`flex items-center gap-2.5 min-w-0 ${right ? "flex-row-reverse text-right" : ""}`}>
       {team.logo
         ? <img src={team.logo} alt="" className="w-8 h-8 object-contain shrink-0" />
         : <div className="w-8 h-8 rounded bg-slate-800 shrink-0" />}
       <div className="min-w-0">
         <div className="font-semibold text-sm text-slate-100 truncate">{team.nom_court || team.nom}</div>
-        <div className="mt-0.5"><FormChips form={team.forme_recente} /></div>
+        <div className={`mt-0.5 flex ${right ? "justify-end" : ""}`}><FormChips form={team.forme_recente} /></div>
       </div>
     </div>
   );
@@ -29,6 +29,8 @@ export function MatchCard({ match, index = 0 }) {
   const h = match.domicile, a = match.exterieur;
   const pred = match.prediction;
   const testid = `match-card-${match.match_id}`;
+  const homeName = h?.nom_court || match.home_team?.shortName || "Dom.";
+  const awayName = a?.nom_court || match.away_team?.shortName || "Ext.";
 
   return (
     <motion.div
@@ -51,7 +53,7 @@ export function MatchCard({ match, index = 0 }) {
           </div>
 
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-            <TeamRow team={h} side="home" />
+            <TeamRow team={h} />
             <div className="flex flex-col items-center px-1">
               {finished
                 ? <div className="font-stat font-black text-lg text-slate-100">
@@ -59,36 +61,25 @@ export function MatchCard({ match, index = 0 }) {
                   </div>
                 : <div className="text-xs text-slate-500 font-head font-bold">VS</div>}
             </div>
-            <div className="flex justify-end"><TeamRow team={a} side="away" /></div>
+            <TeamRow team={a} align="right" />
           </div>
 
-          <div className="grid grid-cols-2 gap-4 mt-4">
-            <div className="flex items-center gap-2">
-              <ScoreBadge score={h?.global} size="sm" testid={`${testid}-home-global`} />
-              <span className="text-[10px] text-slate-500 uppercase font-head">Global<br/>Domicile</span>
-            </div>
-            <div className="flex items-center gap-2 justify-end">
-              <span className="text-[10px] text-slate-500 uppercase font-head text-right">Global<br/>Extérieur</span>
-              <ScoreBadge score={a?.global} size="sm" testid={`${testid}-away-global`} />
-            </div>
-          </div>
-
-          {pred && (
-            <div className={`mt-3 rounded-lg px-3 py-2 border ${match.value ? "bg-amber-500/10 border-amber-500/40" : "bg-slate-800/40 border-slate-800"}`} data-testid={`${testid}-prediction`}>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] uppercase tracking-wide text-slate-500 font-head flex items-center gap-1.5">
-                  {finished ? "Probabilités avant-match" : "Probabilités"} · {pred.modele || "Elo"}
+          {pred ? (
+            <div className={`mt-4 rounded-lg px-3 py-2.5 border ${match.value ? "bg-amber-500/5 border-amber-500/40" : "bg-slate-900/40 border-slate-800"}`}
+              data-testid={`${testid}-prediction`}>
+              <div className="flex items-center justify-between mb-2 gap-2">
+                <span className="text-[10px] uppercase tracking-wide text-slate-400 font-head font-semibold flex items-center gap-1.5">
+                  {MODEL_NAME}{finished ? " · avant-match" : ""}
                   <ValueBadge value={match.value} testid={`${testid}-value-badge`} />
                 </span>
-                <span className="text-[11px] font-stat text-slate-400" data-testid={`${testid}-elo`}
-                  title="Notes Elo (domicile · extérieur)">
-                  {pred.elo_domicile} · {pred.elo_exterieur}
+                <span className="text-[10px] text-slate-500 font-stat" data-testid={`${testid}-elo`}
+                  title="Notes Elo avant le match (domicile · extérieur)">
+                  {pred.modele || "Elo"}
                 </span>
               </div>
-              <ProbabilityBar pred={pred} homeName={h?.nom_court || "Dom."} awayName={a?.nom_court || "Ext."}
-                testid={`${testid}-probas`} />
+              <ForecastNumbers pred={pred} homeName={homeName} awayName={awayName} testid={`${testid}-probas`} />
               {match.cotes && (
-                <div className="mt-1.5 pt-1.5 border-t border-slate-800/80">
+                <div className="mt-2 pt-2 border-t border-slate-800/80">
                   <OddsLine cotes={match.cotes} value={match.value} testid={`${testid}-odds`} />
                 </div>
               )}
@@ -96,29 +87,20 @@ export function MatchCard({ match, index = 0 }) {
                 <div className="mt-1 text-[10px] text-slate-500">Notes encore peu fiables ({pred.matchs_min} matchs)</div>
               )}
             </div>
+          ) : (
+            <div className="mt-3 flex justify-center"><DataUnavailable label="Pronostic indisponible (historique manquant)" /></div>
           )}
 
-          {(h || a) && (
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 mt-4 pt-3 border-t border-slate-800">
-              <div className="space-y-1.5">
-                <ScoreBar label="Attaque" score={h?.offensif} />
-                <ScoreBar label="Défense" score={h?.defensif} />
-                <ScoreBar label="Forme" score={h?.forme} />
-              </div>
-              <div className="space-y-1.5">
-                <ScoreBar label="Attaque" score={a?.offensif} />
-                <ScoreBar label="Défense" score={a?.defensif} />
-                <ScoreBar label="Forme" score={a?.forme} />
-              </div>
-            </div>
-          )}
-
-          {!h && !a && (
-            <div className="mt-3 flex justify-center"><DataUnavailable label="Analyse indisponible (historique manquant)" /></div>
-          )}
-
-          <div className="flex items-center justify-end mt-3 text-emerald-400 text-xs font-semibold">
-            Analyse détaillée <ChevronRight className="w-3.5 h-3.5" />
+          <div className="flex items-center justify-between mt-3 text-xs">
+            <span className="text-slate-500" data-testid={`${testid}-form-notes`}
+              title="Note de forme /100 : résumé des 10 derniers matchs du championnat (indicateur descriptif)">
+              {h?.global != null && a?.global != null
+                ? <>Forme /100 : <span className="font-stat text-slate-400">{h.global} · {a.global}</span></>
+                : null}
+            </span>
+            <span className="flex items-center text-emerald-400 font-semibold">
+              Analyse <ChevronRight className="w-3.5 h-3.5" />
+            </span>
           </div>
         </div>
       </Link>

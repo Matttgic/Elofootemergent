@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
-import { ProbabilityBar } from "../components/Probabilities";
+import { BestMethodBadge, ForecastNumbers, MODEL_NAME } from "../components/Forecast";
 import { FormChips } from "../components/FormChips";
 import { Skeleton } from "../components/ui/skeleton";
 import { frDate, frDateShort } from "../lib/format";
@@ -99,7 +99,7 @@ export default function Compare() {
     ["Buts / match", d.a.stats?.buts_par_match, d.b.stats?.buts_par_match, true],
     ["Encaissés / match", d.a.stats?.encaisses_par_match, d.b.stats?.encaisses_par_match, false],
     ["Cages inviolées", d.a.stats?.clean_sheets, d.b.stats?.clean_sheets, true],
-    ["Note /100", d.a.global, d.b.global, true],
+    ["Forme /100", d.a.global, d.b.global, true],
     ["Classement", d.a.classement?.position, d.b.classement?.position, false],
   ] : [];
 
@@ -127,18 +127,21 @@ export default function Compare() {
           </div>
 
           <div className="card-surface rounded-xl p-5 space-y-4" data-testid="compare-probas">
-            <h3 className="font-head font-bold text-slate-100">Probabilités selon le terrain (modèle Elo)</h3>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h3 className="font-head font-bold text-slate-100">{MODEL_NAME} selon le terrain</h3>
+              <BestMethodBadge />
+            </div>
             {[["a_recoit", nameA, nameB], ["b_recoit", nameB, nameA]].map(([k, home, away]) => (
               <div key={k}>
                 <div className="text-xs text-slate-400 mb-1.5">Si <b className="text-slate-200">{home}</b> reçoit {away}</div>
-                <ProbabilityBar pred={d[k]} homeName={home} awayName={away} testid={`compare-${k}`} />
+                <ForecastNumbers pred={d[k]} homeName={home} awayName={away} testid={`compare-${k}`} />
               </div>
             ))}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="card-surface rounded-xl p-5">
-              <h3 className="font-head font-bold text-slate-100 mb-2">Notes /100 (10 derniers matchs)</h3>
+              <h3 className="font-head font-bold text-slate-100 mb-2">Note de forme /100 (10 derniers matchs)</h3>
               <ResponsiveContainer width="100%" height={260}>
                 <RadarChart data={radar} outerRadius="70%">
                   <PolarGrid stroke="#334155" />

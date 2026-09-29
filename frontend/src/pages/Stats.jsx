@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { Skeleton } from "../components/ui/skeleton";
 import { BetsList } from "../components/BetsList";
-import { PieChart, TrendingUp, Home as HomeIcon, Scale, Coins, Clock, Target, AlertTriangle } from "lucide-react";
+import { PieChart, TrendingUp, Home as HomeIcon, Scale, Coins, Clock, Target, AlertTriangle, Award } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
+import { MethodRanking } from "../components/Forecast";
 
 function TriBar({ a, b, c, labels }) {
   const av = a ?? 0, bv = b ?? 0, cv = c ?? 0;
@@ -153,7 +156,7 @@ function BetSimulation({ sim }) {
   const stakeLabel = { mise_fixe: "Mise fixe (1 u)", kelly: "¼ Kelly (bankroll 100 u)" };
 
   return (
-    <div className="card-surface rounded-xl p-5 mt-4" data-testid="stat-bet-simulation">
+    <div className="card-surface rounded-xl p-5" data-testid="stat-bet-simulation">
       <div className="flex items-center gap-2 mb-1">
         <Coins className="w-5 h-5 text-amber-400" />
         <h3 className="font-head font-bold text-slate-100">Simulation de paris</h3>
@@ -278,7 +281,7 @@ function ModelQuality({ q }) {
     <div className="card-surface rounded-xl p-5 mb-4" data-testid="stat-model-quality">
       <div className="flex items-center gap-2 mb-1">
         <Target className="w-5 h-5 text-cyan-400" />
-        <h3 className="font-head font-bold text-slate-100">Qualité des probabilités (saison en cours)</h3>
+        <h3 className="font-head font-bold text-slate-100">Le Pronostic FootPulse cette saison</h3>
       </div>
       <p className="text-xs text-slate-500 mb-4">
         {q.matchs} matchs, probabilités calculées avant chaque coup d'envoi
@@ -296,7 +299,7 @@ function ModelQuality({ q }) {
       </div>
       <p className="text-xs text-slate-400 mb-3">
         Référence = simples fréquences domicile / nul / extérieur. {better
-          ? "Le modèle Elo fait mieux que cette référence."
+          ? "Le pronostic fait mieux que cette référence."
           : "Le modèle ne fait pas mieux que cette référence sur cet échantillon."}
       </p>
       {q.note_100 && (
@@ -361,16 +364,23 @@ function ModelQuality({ q }) {
 export default function Stats() {
   const [d, setD] = useState(null);
   const [sim, setSim] = useState(null);
+  const [ranking, setRanking] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [gapKind, setGapKind] = useState("note");
+  const [gapKind, setGapKind] = useState("elo");
+  const [tab, setTab] = useState("fiabilite");
 
   useEffect(() => {
     api.get("/stats").then((r) => setD(r.data)).catch(() => setD(null)).finally(() => setLoading(false));
     api.get("/bets/simulation").then((r) => setSim(r.data)).catch(() => setSim(null));
+    api.get("/scoring/config").then((r) => setRanking(r.data?.elo?.backtest?.classement || null)).catch(() => {});
   }, []);
 
   if (loading) return <div className="max-w-3xl mx-auto px-4 py-6 space-y-4"><Skeleton className="h-40 rounded-xl bg-slate-800/50" /><Skeleton className="h-64 rounded-xl bg-slate-800/50" /></div>;
   if (!d?.disponible) return <div className="max-w-3xl mx-auto px-4 py-10 text-center text-slate-400">Statistiques indisponibles pour le moment.</div>;
+
+  const site = ranking?.methodes.find((m) => m.site);
+  const note = ranking?.methodes.find((m) => m.id === "note");
+  const triggerCls = "data-[state=active]:bg-emerald-500 data-[state=active]:text-white text-xs sm:text-sm";
 
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-6 py-6">
@@ -378,81 +388,121 @@ export default function Stats() {
         <PieChart className="w-7 h-7 text-emerald-400" /> Stats
       </h1>
       <p className="text-slate-400 text-sm mb-6">
-        Lien entre les notes (Elo et note globale /100) et les résultats réels · <b className="text-slate-200">{d.echantillon}</b> matchs
+        Quelle méthode prévoit le mieux les matchs, et ce que donne le pronostic cette saison · <b className="text-slate-200">{d.echantillon}</b> matchs analysés
         {d.echantillon_saison ? <> dont <b className="text-slate-200">{d.echantillon_saison}</b> cette saison</> : null}.
       </p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-        <div className="card-surface rounded-xl p-5" data-testid="stat-higher-rated">
-          <div className="flex items-center gap-2 mb-3">
-            <TrendingUp className="w-5 h-5 text-emerald-400" />
-            <h3 className="font-head font-bold text-slate-100">Favori selon l'Elo</h3>
+      {ranking && (
+        <div className="card-surface rounded-xl p-5 mb-5 border border-emerald-500/20" data-testid="stat-ranking">
+          <div className="flex items-center gap-2 mb-1">
+            <Award className="w-5 h-5 text-emerald-400" />
+            <h2 className="font-head text-lg font-bold text-slate-50">Quelle méthode prévoit le mieux ?</h2>
           </div>
-          <div className="text-3xl font-black font-stat text-emerald-400 mb-1">{d.favori_elo.victoires_pct}%</div>
-          <p className="text-xs text-slate-500 mb-3">de victoires pour l'équipe au meilleur Elo (avantage du terrain compris)</p>
-          <TriBar a={d.favori_elo.victoires_pct} b={d.favori_elo.nuls_pct} c={d.favori_elo.defaites_pct}
-            labels={["Gagne", "Nul", "Perd"]} />
-        </div>
-
-        {d.notes?.disponible && (
-          <div className="card-surface rounded-xl p-5" data-testid="stat-better-note">
-            <div className="flex items-center gap-2 mb-3">
-              <TrendingUp className="w-5 h-5 text-cyan-400" />
-              <h3 className="font-head font-bold text-slate-100">Mieux notée (note /100)</h3>
-            </div>
-            <div className="text-3xl font-black font-stat text-cyan-400 mb-1">{d.notes.mieux_notee.tous.victoires_pct}%</div>
-            <p className="text-xs text-slate-500 mb-3">
-              de victoires pour l'équipe à la meilleure note globale (domicile {d.notes.mieux_notee.domicile.victoires_pct}%,
-              extérieur {d.notes.mieux_notee.exterieur.victoires_pct}%)
+          {site && note && (
+            <p className="text-sm text-slate-300 mb-4" data-testid="stat-ranking-summary">
+              Le <b className="text-emerald-300">Pronostic FootPulse</b> (force Elo + forme xG) est notre meilleure méthode :
+              indice <b className="text-slate-50">{site.indice}</b>, contre {note.indice} pour la note de forme /100.
+              Seules les cotes des bookmakers font mieux.
             </p>
-            <TriBar a={d.notes.mieux_notee.tous.victoires_pct} b={d.notes.mieux_notee.tous.nuls_pct}
-              c={d.notes.mieux_notee.tous.defaites_pct} labels={["Gagne", "Nul", "Perd"]} />
-          </div>
-        )}
-
-        <div className="card-surface rounded-xl p-5 sm:col-span-2" data-testid="stat-home-advantage">
-          <div className="flex items-center gap-2 mb-3">
-            <HomeIcon className="w-5 h-5 text-emerald-400" />
-            <h3 className="font-head font-bold text-slate-100">Avantage du terrain</h3>
-          </div>
-          <div className="text-3xl font-black font-stat text-emerald-400 mb-1">{d.avantage_domicile.domicile_pct}%</div>
-          <p className="text-xs text-slate-500 mb-3">de victoires pour l'équipe à domicile</p>
-          <TriBar a={d.avantage_domicile.domicile_pct} b={d.avantage_domicile.nul_pct} c={d.avantage_domicile.exterieur_pct}
-            labels={["Domicile", "Nul", "Extérieur"]} />
-        </div>
-      </div>
-
-      <ModelQuality q={d.modele} />
-
-      <div className="card-surface rounded-xl p-5" data-testid="stat-by-gap">
-        <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
-          <div className="flex items-center gap-2">
-            <Scale className="w-5 h-5 text-emerald-400" />
-            <h3 className="font-head font-bold text-slate-100">Résultat selon l'écart</h3>
-          </div>
-          {d.notes?.disponible && (
-            <div className="flex rounded-lg bg-slate-800/60 p-0.5">
-              {[["elo", "Elo"], ["note", "Note /100"]].map(([k, label]) => (
-                <button key={k} onClick={() => setGapKind(k)} data-testid={`gap-kind-${k}`}
-                  className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
-                    gapKind === k ? "bg-emerald-500 text-white" : "text-slate-400 hover:text-slate-200"}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
           )}
+          <MethodRanking classement={ranking} />
+          <Link to="/methodologie#classement" className="inline-block mt-2 text-xs text-emerald-400 hover:text-emerald-300">
+            Détail des tests →
+          </Link>
         </div>
-        {gapKind === "note" && d.notes?.disponible ? <NoteGaps notes={d.notes} /> : (
-          <>
-            <GapList rows={d.par_ecart_elo} prefix="stat" unit="pts" labels={["Favori", "Nul", "Outsider"]}
-              fav="du favori" />
-            <p className="text-[11px] text-slate-500 mt-4">{d.note}</p>
-          </>
-        )}
-      </div>
+      )}
 
-      <BetSimulation sim={sim} />
-      <BetsList />
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="bg-slate-900/60 border border-slate-800 flex-wrap h-auto mb-4">
+          <TabsTrigger value="fiabilite" data-testid="stats-tab-fiabilite" className={triggerCls}>
+            <Target className="w-4 h-4 mr-1.5" /> Fiabilité cette saison
+          </TabsTrigger>
+          <TabsTrigger value="ecarts" data-testid="stats-tab-ecarts" className={triggerCls}>
+            <Scale className="w-4 h-4 mr-1.5" /> Résultats par écart
+          </TabsTrigger>
+          <TabsTrigger value="paris" data-testid="stats-tab-paris" className={triggerCls}>
+            <Coins className="w-4 h-4 mr-1.5" /> Paris simulés
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="fiabilite">
+          <ModelQuality q={d.modele} />
+        </TabsContent>
+
+        <TabsContent value="ecarts">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div className="card-surface rounded-xl p-5" data-testid="stat-higher-rated">
+              <div className="flex items-center gap-2 mb-3">
+                <TrendingUp className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-head font-bold text-slate-100">Favori selon l'Elo</h3>
+              </div>
+              <div className="text-3xl font-black font-stat text-emerald-400 mb-1">{d.favori_elo.victoires_pct}%</div>
+              <p className="text-xs text-slate-500 mb-3">de victoires pour l'équipe au meilleur Elo (avantage du terrain compris)</p>
+              <TriBar a={d.favori_elo.victoires_pct} b={d.favori_elo.nuls_pct} c={d.favori_elo.defaites_pct}
+                labels={["Gagne", "Nul", "Perd"]} />
+            </div>
+
+            {d.notes?.disponible && (
+              <div className="card-surface rounded-xl p-5" data-testid="stat-better-note">
+                <div className="flex items-center gap-2 mb-3">
+                  <TrendingUp className="w-5 h-5 text-slate-400" />
+                  <h3 className="font-head font-bold text-slate-100">Mieux notée (forme /100)</h3>
+                </div>
+                <div className="text-3xl font-black font-stat text-slate-200 mb-1">{d.notes.mieux_notee.tous.victoires_pct}%</div>
+                <p className="text-xs text-slate-500 mb-3">
+                  de victoires pour l'équipe à la meilleure note de forme (domicile {d.notes.mieux_notee.domicile.victoires_pct}%,
+                  extérieur {d.notes.mieux_notee.exterieur.victoires_pct}%)
+                </p>
+                <TriBar a={d.notes.mieux_notee.tous.victoires_pct} b={d.notes.mieux_notee.tous.nuls_pct}
+                  c={d.notes.mieux_notee.tous.defaites_pct} labels={["Gagne", "Nul", "Perd"]} />
+              </div>
+            )}
+
+            <div className="card-surface rounded-xl p-5 sm:col-span-2" data-testid="stat-home-advantage">
+              <div className="flex items-center gap-2 mb-3">
+                <HomeIcon className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-head font-bold text-slate-100">Avantage du terrain</h3>
+              </div>
+              <div className="text-3xl font-black font-stat text-emerald-400 mb-1">{d.avantage_domicile.domicile_pct}%</div>
+              <p className="text-xs text-slate-500 mb-3">de victoires pour l'équipe à domicile</p>
+              <TriBar a={d.avantage_domicile.domicile_pct} b={d.avantage_domicile.nul_pct} c={d.avantage_domicile.exterieur_pct}
+                labels={["Domicile", "Nul", "Extérieur"]} />
+            </div>
+          </div>
+
+          <div className="card-surface rounded-xl p-5" data-testid="stat-by-gap">
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+              <div className="flex items-center gap-2">
+                <Scale className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-head font-bold text-slate-100">Résultat selon l'écart</h3>
+              </div>
+              {d.notes?.disponible && (
+                <div className="flex rounded-lg bg-slate-800/60 p-0.5">
+                  {[["elo", "Force Elo"], ["note", "Forme /100"]].map(([k, label]) => (
+                    <button key={k} onClick={() => setGapKind(k)} data-testid={`gap-kind-${k}`}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
+                        gapKind === k ? "bg-emerald-500 text-white" : "text-slate-400 hover:text-slate-200"}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {gapKind === "note" && d.notes?.disponible ? <NoteGaps notes={d.notes} /> : (
+              <>
+                <GapList rows={d.par_ecart_elo} prefix="stat" unit="pts" labels={["Favori", "Nul", "Outsider"]}
+                  fav="du favori" />
+                <p className="text-[11px] text-slate-500 mt-4">{d.note}</p>
+              </>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="paris">
+          <BetSimulation sim={sim} />
+          <BetsList />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

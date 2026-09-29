@@ -1,104 +1,131 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../lib/api";
-import { ScoreBadge } from "../components/ScoreBadge";
-import { ScoreBar } from "../components/ScoreBar";
 import { ScoreBreakdown } from "../components/ScoreBreakdown";
 import { MarketSignals } from "../components/MarketSignals";
 import { PlayerWatchCard } from "../components/PlayerCard";
 import { DataUnavailable } from "../components/DataUnavailable";
 import { FormChips } from "../components/FormChips";
 import { OddsLine, ValueBadge } from "../components/Probabilities";
+import { BestMethodBadge, ForecastNumbers, ModelTag, MODEL_NAME } from "../components/Forecast";
 import { frDate, kickoff, scoreColor } from "../lib/format";
 import { Skeleton } from "../components/ui/skeleton";
-import { ArrowLeft, Trophy, Users, History, Swords } from "lucide-react";
-import {
-  Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Legend,
-} from "recharts";
+import { ArrowLeft, Trophy, Users, History, Swords, Scale } from "lucide-react";
 
-function TeamPanel({ team, side, code }) {
-  if (!team) {
-    return <div className="card-surface rounded-xl p-5"><DataUnavailable label="Analyse indisponible" /></div>;
+const fmtSigned = (v, digits = 2) => `${v > 0 ? "+" : ""}${v.toFixed(digits).replace(".", ",")}`;
+
+// Les deux équipes côte à côte : force Elo et forme xG (ce qu'utilise le pronostic), puis
+// la note de forme /100 et ses composantes (indicateurs descriptifs).
+function TeamsComparison({ home, away, code, noteHist }) {
+  if (!home || !away) {
+    return <div className="card-surface rounded-xl p-5"><DataUnavailable label="Analyse des équipes indisponible" /></div>;
   }
-  const scores = [
-    { key: "global", label: "Score global", data: team.global },
-    { key: "offensif", label: "Attaque", data: team.offensif },
-    { key: "defensif", label: "Défense", data: team.defensif },
-    { key: "forme", label: "Forme", data: team.forme },
+  const eloRank = (t) => (t.elo?.rang ? `${t.elo.rang}e sur ${t.elo.sur}` : "");
+  const note = (t, k, title) => t[k] ? (
+    <ScoreBreakdown data={t[k]} title={title} team={t.nom_court} testid={`score-breakdown-${k}-${t === home ? "home" : "away"}`}>
+      <button className="font-stat font-bold underline decoration-dotted decoration-slate-600 underline-offset-4"
+        style={{ color: scoreColor(t[k].score) }}>{t[k].score}</button>
+    </ScoreBreakdown>
+  ) : <span className="text-slate-600">—</span>;
+  const venueScore = (v) => (v == null ? <span className="text-slate-600">—</span>
+    : <span className="font-stat" style={{ color: scoreColor(v) }}>{v}</span>);
+  const better = (a, b, higher = true) => (a == null || b == null || a === b ? null : (a > b) === higher ? "h" : "a");
+
+  const primary = [
+    ["Force Elo", home.elo?.elo, away.elo?.elo,
+      (t) => t.elo ? <><b className="font-stat text-slate-100">{t.elo.elo}</b><span className="block text-slate-500 text-[10px]">{eloRank(t)}</span></> : "—",
+      "team-elo"],
+    ["Forme xG par match", home.elo?.forme_xg, away.elo?.forme_xg,
+      (t) => t.elo?.forme_xg != null ? <span className="font-stat text-slate-100">{fmtSigned(t.elo.forme_xg)}</span> : <span className="text-slate-600">—</span>],
+    ["5 derniers matchs", null, null, (t) => <FormChips form={t.stats?.forme_recente} />],
+    ["Classement", home.classement?.position, away.classement?.position,
+      (t) => t.classement ? <span className="font-stat text-slate-300">{t.classement.position}e · {t.classement.points} pts</span> : "—", null, false],
   ];
+  const secondary = [
+    ["Note de forme /100", "global", "Note de forme"],
+    ["Attaque /100", "offensif", "Attaque"],
+    ["Défense /100", "defensif", "Défense"],
+    ["Résultats /100", "forme", "Résultats"],
+  ];
+
+  const Cell = ({ side, children }) => (
+    <td className={`py-2 px-1 sm:px-2 ${side === "h" ? "text-left" : "text-right"}`}>{children}</td>
+  );
+
   return (
-    <div className="card-surface rounded-xl p-5" data-testid={`team-panel-${side}`}>
-      <div className="flex items-center gap-3 mb-4">
-        {team.logo ? <img src={team.logo} alt="" className="w-12 h-12 object-contain" />
-          : <div className="w-12 h-12 rounded bg-slate-800" />}
-        <div className="min-w-0">
-          <Link to={`/equipe/${code}/${team.team_id}`} data-testid={`team-link-${side}`}
-            className="font-head font-bold text-lg text-slate-50 truncate block hover:text-emerald-400">
-            {team.nom}
-          </Link>
-          <div className="flex items-center gap-2 mt-1">
-            <FormChips form={team.stats?.forme_recente} />
-            {team.classement && (
-              <span className="text-xs text-slate-500 font-stat">#{team.classement.position}</span>
-            )}
-            {team.elo && (
-              <span className="text-xs text-slate-400 font-stat" data-testid={`team-elo-${side}`}
-                title={team.elo.rang ? `${team.elo.rang}e Elo sur ${team.elo.sur} en ${team.elo.championnat_nom || team.elo.championnat}` : "Note Elo"}>
-                Elo <b className="text-slate-200">{team.elo.elo}</b>
-              </span>
-            )}
+    <div className="card-surface rounded-xl p-5" data-testid="teams-compare">
+      <h2 className="font-head text-lg font-bold text-slate-50 mb-3 flex items-center gap-2">
+        <Scale className="w-5 h-5 text-emerald-400" /> Les deux équipes
+      </h2>
+      <table className="w-full text-sm table-fixed">
+        <thead>
+          <tr className="border-b border-slate-800">
+            {[["h", home], [null, null], ["a", away]].map(([side, t], i) => side ? (
+              <th key={i} className={`py-2 px-1 sm:px-2 w-[37%] ${side === "h" ? "text-left" : "text-right"}`}>
+                <Link to={`/equipe/${code}/${t.team_id}`} data-testid={`team-link-${side === "h" ? "home" : "away"}`}
+                  className={`flex items-center gap-2 font-head font-bold text-slate-50 hover:text-emerald-400 min-w-0 ${side === "a" ? "flex-row-reverse" : ""}`}>
+                  {t.logo && <img src={t.logo} alt="" className="w-6 h-6 object-contain shrink-0" />}
+                  <span className="truncate">{t.nom_court || t.nom}</span>
+                </Link>
+              </th>
+            ) : <th key={i} />)}
+          </tr>
+        </thead>
+        <tbody>
+          {primary.map(([label, hv, av, render, testid, higher = true]) => {
+            const b = better(hv, av, higher);
+            return (
+              <tr key={label} className="border-b border-slate-800/60">
+                <Cell side="h"><span data-testid={testid ? `${testid}-home` : undefined} className={`inline-flex flex-col items-start ${b === "a" ? "opacity-60" : ""}`}>{render(home)}</span></Cell>
+                <td className="py-2 px-1 text-center text-[10px] sm:text-[11px] leading-tight text-slate-400">{label}</td>
+                <Cell side="a"><span data-testid={testid ? `${testid}-away` : undefined} className={`inline-flex flex-col items-end ${b === "h" ? "opacity-60" : ""}`}>{render(away)}</span></Cell>
+              </tr>
+            );
+          })}
+          <tr><td colSpan={3} className="pt-4 pb-1 text-[10px] uppercase tracking-wide text-slate-500">
+            Note de forme /100 · 10 derniers matchs du championnat (descriptif)
+          </td></tr>
+          {secondary.map(([label, k, title]) => (
+            <tr key={k} className="border-b border-slate-800/60" data-testid={`compare-row-${k}`}>
+              <Cell side="h">{note(home, k, title)}</Cell>
+              <td className="py-2 px-1 text-center text-[10px] sm:text-[11px] leading-tight text-slate-400">{label}</td>
+              <Cell side="a">{note(away, k, title)}</Cell>
+            </tr>
+          ))}
+          <tr className="border-b border-slate-800/60">
+            <Cell side="h">{venueScore(home.domicile?.score)}</Cell>
+            <td className="py-2 px-1 text-center text-[10px] sm:text-[11px] leading-tight text-slate-400">À domicile · à l'extérieur</td>
+            <Cell side="a">{venueScore(away.exterieur?.score)}</Cell>
+          </tr>
+          <tr>
+            <Cell side="h"><span className="font-stat text-slate-300">{home.stats ? `${home.stats.buts_marques} – ${home.stats.buts_encaisses}` : "—"}</span></Cell>
+            <td className="py-2 px-1 text-center text-[10px] sm:text-[11px] leading-tight text-slate-400">Buts pour – contre</td>
+            <Cell side="a"><span className="font-stat text-slate-300">{away.stats ? `${away.stats.buts_marques} – ${away.stats.buts_encaisses}` : "—"}</span></Cell>
+          </tr>
+        </tbody>
+      </table>
+      {noteHist && (
+        <div className="mt-4 rounded-lg bg-slate-900/50 p-3 text-xs text-slate-400" data-testid="note-history">
+          <div className="mb-1.5">
+            Notes /100 : <b className="text-slate-200">{home.nom_court} {home.global?.score}</b> contre{" "}
+            <b className="text-slate-200">{away.nom_court} {away.global?.score}</b> (écart {noteHist.ecart}). Par le passé, quand
+            l'équipe la mieux notée (ici {home.global?.score > away.global?.score ? home.nom_court : away.nom_court}) jouait{" "}
+            {noteHist.terrain === "domicile" ? "à domicile" : "à l'extérieur"} avec un écart de {noteHist.tranche} ({noteHist.matchs} matchs) :
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            {[["victoire", noteHist.favori_gagne_pct], ["nul", noteHist.nul_pct], ["défaite", noteHist.outsider_gagne_pct]].map(([l, v]) => (
+              <div key={l} className="bg-slate-800/60 rounded-md py-1">
+                <div className="font-stat font-bold text-sm text-slate-200">{v}%</div>
+                <div className="text-[10px] text-slate-500">{l}</div>
+              </div>
+            ))}
           </div>
         </div>
-        <div className="ml-auto">
-          <ScoreBreakdown data={team.global} title="Score global" team={team.nom_court}
-            testid={`score-breakdown-global-${side}`}>
-            <button><ScoreBadge score={team.global?.score} size="lg" /></button>
-          </ScoreBreakdown>
-        </div>
-      </div>
-
-      <div className="space-y-2.5">
-        {scores.slice(1).map((s) => (
-          <ScoreBreakdown key={s.key} data={s.data} title={s.label} team={team.nom_court}
-            testid={`score-breakdown-${s.key}-${side}`}>
-            <div><ScoreBar label={`${s.label} · voir le détail`} score={s.data?.score} /></div>
-          </ScoreBreakdown>
-        ))}
-      </div>
-
-      {team.stats && (
-        <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-slate-800 text-center">
-          <div><div className="font-stat font-bold text-emerald-400">{team.stats.buts_marques}</div><div className="text-[10px] text-slate-500 uppercase">Buts</div></div>
-          <div><div className="font-stat font-bold text-red-400">{team.stats.buts_encaisses}</div><div className="text-[10px] text-slate-500 uppercase">Encaissés</div></div>
-          <div><div className="font-stat font-bold text-slate-200">{team.stats.difference > 0 ? "+" : ""}{team.stats.difference}</div><div className="text-[10px] text-slate-500 uppercase">Diff.</div></div>
-        </div>
       )}
-    </div>
-  );
-}
-
-function VenueSplit({ home, away }) {
-  const Row = ({ label, score }) => (
-    <div className="flex items-center justify-between py-1.5">
-      <span className="text-xs text-slate-400">{label}</span>
-      {score === null || score === undefined
-        ? <DataUnavailable />
-        : <span className="font-stat font-bold text-sm" style={{ color: scoreColor(score) }}>{score}</span>}
-    </div>
-  );
-  return (
-    <div className="card-surface rounded-xl p-5">
-      <h3 className="font-head font-bold text-slate-100 mb-2">Domicile vs Extérieur</h3>
-      <div className="grid grid-cols-2 gap-6">
-        <div>
-          <div className="text-xs text-emerald-400 font-semibold mb-1">{home?.nom_court} · à domicile</div>
-          <Row label="Score domicile" score={home?.domicile?.score} />
-        </div>
-        <div>
-          <div className="text-xs text-cyan-400 font-semibold mb-1">{away?.nom_court} · à l'extérieur</div>
-          <Row label="Score extérieur" score={away?.exterieur?.score} />
-        </div>
-      </div>
+      <p className="mt-3 text-[11px] text-slate-500">
+        Le pronostic repose sur la force Elo et la forme xG. La note de forme /100 résume les derniers résultats ;
+        elle prévoit nettement moins bien les matchs (<Link to="/methodologie#classement" className="underline hover:text-slate-300">classement des méthodes</Link>).
+      </p>
     </div>
   );
 }
@@ -139,14 +166,6 @@ export default function MatchDetail() {
   const m = d.match, home = d.domicile, away = d.exterieur;
   const finished = m.status === "FINISHED";
 
-  const radarData = ["global", "offensif", "defensif", "forme"].map((k) => ({
-    stat: { global: "Global", offensif: "Attaque", defensif: "Défense", forme: "Forme" }[k],
-    dom: home?.[k]?.score ?? 0,
-    ext: away?.[k]?.score ?? 0,
-  }));
-
-  const advLabel = { global: "Avantage global", offensif: "Avantage offensif", defensif: "Avantage défensif", forme: "Forme" };
-
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-6 py-6">
       <Link to="/" className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-emerald-400 mb-4" data-testid="back-link">
@@ -176,159 +195,99 @@ export default function MatchDetail() {
         </div>
       </div>
 
-      {/* Prédiction & confiance */}
-      {d.signaux?.probabilites && (
-        <div className="card-surface rounded-xl p-5 mb-6" data-testid="prediction-panel">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <div>
-              <h3 className="font-head font-bold text-slate-100 flex items-center gap-2">
-                Probabilités du match <ValueBadge value={d.value} testid="detail-value-badge" />
-              </h3>
-              <div className="text-[11px] text-slate-500">
-                {d.signaux.probabilites.source === "Elo" ? `Modèle ${d.prediction?.modele || "Elo"}` : "Loi de Poisson"}{finished ? " · avant le coup d'envoi" : ""}
+      {/* Pronostic FootPulse : la meilleure méthode testée, mise en avant */}
+      {d.signaux?.probabilites && (() => {
+        const p = d.prediction;
+        const homeName = m.home_team?.shortName || "Dom.", awayName = m.away_team?.shortName || "Ext.";
+        const probs = p || { domicile_pct: d.signaux.probabilites.domicile_pct, nul_pct: d.signaux.probabilites.nul_pct,
+                             exterieur_pct: d.signaux.probabilites.exterieur_pct };
+        const conf = d.fiabilite?.niveau;
+        const confColor = conf === "Élevée" ? "#10B981" : conf === "Moyenne" ? "#F59E0B" : "#EF4444";
+        return (
+          <div className="card-surface rounded-xl p-5 mb-6 border border-emerald-500/20" data-testid="prediction-panel">
+            <div className="flex items-start justify-between mb-4 flex-wrap gap-2">
+              <div>
+                <h2 className="font-head text-xl font-bold text-slate-50 flex items-center gap-2 flex-wrap">
+                  {MODEL_NAME} <ValueBadge value={d.value} testid="detail-value-badge" />
+                </h2>
+                <div className="mt-1 flex items-center gap-2 flex-wrap">
+                  {d.signaux.probabilites.source === "Elo"
+                    ? <ModelTag modele={p?.modele} testid="detail-model" />
+                    : <span className="text-[11px] text-slate-500">Loi de Poisson</span>}
+                  <BestMethodBadge />
+                  {finished && <span className="text-[11px] text-slate-500">calculé avant le coup d'envoi</span>}
+                </div>
               </div>
+              {conf && (
+                <span className="text-xs px-2 py-1 rounded font-stat font-bold" data-testid="confidence-badge"
+                  style={{ color: confColor, backgroundColor: confColor + "1A" }}>
+                  Confiance : {conf}
+                </span>
+              )}
             </div>
-            {d.fiabilite && (
-              <span className="text-xs px-2 py-1 rounded font-stat font-bold" data-testid="confidence-badge"
-                style={{ color: d.fiabilite.niveau === "Élevée" ? "#10B981" : d.fiabilite.niveau === "Moyenne" ? "#F59E0B" : "#EF4444",
-                         backgroundColor: (d.fiabilite.niveau === "Élevée" ? "#10B981" : d.fiabilite.niveau === "Moyenne" ? "#F59E0B" : "#EF4444") + "1A" }}>
-                Confiance : {d.fiabilite.niveau}
-              </span>
+
+            <ForecastNumbers pred={probs} homeName={homeName} awayName={awayName} size="lg" testid="detail-probas" />
+
+            {p && (
+              <div className="mt-4 text-sm text-slate-300" data-testid="detail-favourite">
+                Favori : <b className="text-emerald-300">{p.favori}</b> ({Math.round(p.favori_pct)} %)
+                {p.favori_pct < 45 ? " · match très ouvert" : ""}
+              </div>
             )}
-          </div>
-          <div className="grid grid-cols-3 gap-2 text-center mb-3">
-            {[["Victoire " + (m.home_team?.tla || "dom."), d.signaux.probabilites.domicile_pct, "#10B981"],
-              ["Nul", d.signaux.probabilites.nul_pct, "#64748B"],
-              ["Victoire " + (m.away_team?.tla || "ext."), d.signaux.probabilites.exterieur_pct, "#06B6D4"]].map(([l, v, c]) => (
-              <div key={l} className="bg-slate-900/50 rounded-lg py-2">
-                <div className="font-stat font-black text-2xl" style={{ color: c }}>{v}%</div>
-                <div className="text-[10px] text-slate-500 uppercase truncate px-1">{l}</div>
-              </div>
-            ))}
-          </div>
-          <div className="flex items-center gap-2 flex-wrap text-xs text-slate-400">
-            <span>Scores probables :</span>
-            {d.signaux.probabilites.scores_probables.map((s, i) => (
-              <span key={i} className="font-stat bg-slate-800 rounded px-2 py-0.5 text-slate-200">{s.score} <span className="text-slate-500">{s.pct}%</span></span>
-            ))}
-          </div>
-          {d.prediction && (() => {
-            const p = d.prediction;
-            const homeName = m.home_team?.shortName || "Dom.", awayName = m.away_team?.shortName || "Ext.";
-            const eloHome = p.elo_domicile + (p.avantage_terrain || 0) >= p.elo_exterieur;
-            const fmt = (v) => `${v > 0 ? "+" : ""}${v.toFixed(2).replace(".", ",")}`;
-            return (
-              <div className="mt-3 pt-3 border-t border-slate-800 text-xs text-slate-400 space-y-1" data-testid="elo-note">
-                <div>
-                  Elo : <b className="text-slate-200">{homeName} {p.elo_domicile}</b>
-                  {p.avantage_terrain ? <> + {p.avantage_terrain} à domicile = <b className="text-slate-200">
-                    {p.elo_domicile + p.avantage_terrain}</b></> : null}
-                  {" "}contre <b className="text-slate-200">{awayName} {p.elo_exterieur}</b>
-                  {" "}(avantage Elo : {eloHome ? homeName : awayName}, {p.ecart} pts).
-                </div>
-                {p.xg_domicile !== null && p.xg_domicile !== undefined && (
-                  <div data-testid="xg-note">
-                    Forme xG (occasions créées − concédées par match, derniers matchs) :{" "}
-                    <b className="text-slate-200">{homeName} {fmt(p.xg_domicile)}</b> ·{" "}
-                    <b className="text-slate-200">{awayName} {fmt(p.xg_exterieur)}</b>.
+
+            {p && (() => {
+              const eloHome = p.elo_domicile + (p.avantage_terrain || 0) >= p.elo_exterieur;
+              return (
+                <div className="mt-3 rounded-lg bg-slate-900/50 p-3 text-xs text-slate-400 space-y-1.5" data-testid="elo-note">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500">Pourquoi ce pronostic</div>
+                  <div>
+                    <b className="text-slate-300">Force Elo</b> : {homeName} {p.elo_domicile}
+                    {p.avantage_terrain ? <> + {p.avantage_terrain} à domicile = <b className="text-slate-200">{p.elo_domicile + p.avantage_terrain}</b></> : null}
+                    {" "}contre {awayName} <b className="text-slate-200">{p.elo_exterieur}</b> (avantage {eloHome ? homeName : awayName}, {p.ecart} pts).
                   </div>
-                )}
-                <div>
-                  Favori du modèle : <b className="text-emerald-400">{p.favori}</b> ({Math.round(p.favori_pct)} %)
-                  {p.favori_pct < 45 ? ", match très ouvert" : ""}.
-                </div>
-              </div>
-            );
-          })()}
-          {noteHist && (() => {
-            const homeName = m.home_team?.shortName || "Dom.", awayName = m.away_team?.shortName || "Ext.";
-            const better = noteDom > noteExt ? homeName : awayName;
-            return (
-              <div className="mt-2 pt-2 border-t border-slate-800 text-xs text-slate-400" data-testid="note-history">
-                <div className="mb-1.5">
-                  Notes /100 : <b className="text-slate-200">{homeName} {noteDom}</b> contre{" "}
-                  <b className="text-slate-200">{awayName} {noteExt}</b> (écart {noteHist.ecart}). Par le passé, quand
-                  l'équipe la mieux notée (ici {better}) jouait {noteHist.terrain === "domicile" ? "à domicile" : "à l'extérieur"}{" "}
-                  avec un écart de {noteHist.tranche} ({noteHist.matchs} matchs) :
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  {[["victoire", noteHist.favori_gagne_pct, "text-emerald-400"], ["nul", noteHist.nul_pct, "text-slate-300"],
-                    ["défaite", noteHist.outsider_gagne_pct, "text-red-400"]].map(([l, v, c]) => (
-                    <div key={l} className="bg-slate-900/50 rounded-md py-1">
-                      <div className={`font-stat font-bold text-sm ${c}`}>{v}%</div>
-                      <div className="text-[10px] text-slate-500 truncate px-1">{l}</div>
+                  {p.xg_domicile !== null && p.xg_domicile !== undefined && (
+                    <div data-testid="xg-note">
+                      <b className="text-slate-300">Forme xG</b> (occasions créées − concédées par match, derniers matchs) :{" "}
+                      {homeName} <b className="text-slate-200">{fmtSigned(p.xg_domicile)}</b> · {awayName} <b className="text-slate-200">{fmtSigned(p.xg_exterieur)}</b>.
                     </div>
-                  ))}
+                  )}
                 </div>
-              </div>
-            );
-          })()}
-          {d.cotes && (
-            <div className="mt-2 rounded-lg bg-slate-900/50 px-3 py-2" data-testid="detail-odds">
-              <OddsLine cotes={d.cotes} value={d.value} />
-              <div className="text-[10px] text-slate-500 mt-1">
-                {d.cotes.bookmaker ? `Bookmaker : ${d.cotes.bookmaker}. ` : ""}
-                {d.value
-                  ? `Écart modèle / cote : ${d.value.proba_pct}% estimés contre ${Math.round(100 / d.value.cote)}% implicites (avantage théorique ${d.value.avantage_pct}%). Signal indicatif, non rentable sur l'historique.`
-                  : "Aucun écart notable entre le modèle et la cote."}
-              </div>
-            </div>
-          )}
-          {(d.repos?.domicile != null || d.repos?.exterieur != null) && (
-            <div className="mt-2 text-xs text-slate-500" data-testid="rest-days">
-              Repos : {m.home_team?.tla || "Dom."} {d.repos.domicile ?? "?"} j · {m.away_team?.tla || "Ext."} {d.repos.exterieur ?? "?"} j
-            </div>
-          )}
-        </div>
-      )}
+              );
+            })()}
 
-      {/* Score panels */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <TeamPanel team={home} side="home" code={m.competition?.code} />
-        <TeamPanel team={away} side="away" code={m.competition?.code} />
-      </div>
-
-      {/* Radar + avantages */}
-      {home && away && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-          <div className="card-surface rounded-xl p-5">
-            <h3 className="font-head font-bold text-slate-100 mb-2">Comparaison visuelle</h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <RadarChart data={radarData} outerRadius="72%" cx="50%" cy="50%">
-                <PolarGrid stroke="#334155" />
-                <PolarAngleAxis dataKey="stat" tick={{ fill: "#94A3B8", fontSize: 12 }} />
-                <PolarRadiusAxis angle={90} domain={[0, 100]} tickCount={5} tick={{ fill: "#475569", fontSize: 9 }} axisLine={false} />
-                <Radar name={home.nom_court} dataKey="dom" stroke="#10B981" fill="#10B981" fillOpacity={0.4} isAnimationActive={false} />
-                <Radar name={away.nom_court} dataKey="ext" stroke="#06B6D4" fill="#06B6D4" fillOpacity={0.3} isAnimationActive={false} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-              </RadarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="card-surface rounded-xl p-5">
-            <h3 className="font-head font-bold text-slate-100 mb-3">Avantages</h3>
-            <div className="space-y-2">
-              {d.avantages && Object.entries(d.avantages).map(([k, v]) => (
-                <div key={k} className="flex items-center justify-between py-2 border-b border-slate-800 last:border-0" data-testid={`avantage-${k}`}>
-                  <span className="text-sm text-slate-400">{advLabel[k]}</span>
-                  {v.gagnant
-                    ? <span className="text-sm font-bold text-emerald-400">
-                        {v.gagnant}{v.ecart ? <span className="text-slate-500 font-normal ml-1 font-stat">+{v.ecart}</span> : ""}
-                      </span>
-                    : <DataUnavailable />}
-                </div>
+            <div className="mt-3 flex items-center gap-2 flex-wrap text-xs text-slate-400">
+              <span>Scores probables :</span>
+              {d.signaux.probabilites.scores_probables.map((sp, i) => (
+                <span key={i} className="font-stat bg-slate-800 rounded px-2 py-0.5 text-slate-200">{sp.score} <span className="text-slate-500">{sp.pct}%</span></span>
               ))}
             </div>
-          </div>
-        </div>
-      )}
 
-      <VenueSplit home={home} away={away} />
+            {d.cotes && (
+              <div className="mt-3 rounded-lg bg-slate-900/50 px-3 py-2" data-testid="detail-odds">
+                <OddsLine cotes={d.cotes} value={d.value} />
+                <div className="text-[10px] text-slate-500 mt-1">
+                  {d.cotes.bookmaker ? `Bookmaker : ${d.cotes.bookmaker}. ` : ""}
+                  {d.value
+                    ? `Écart modèle / cote : ${d.value.proba_pct}% estimés contre ${Math.round(100 / d.value.cote)}% implicites (avantage théorique ${d.value.avantage_pct}%). Signal indicatif, non rentable sur l'historique.`
+                    : "Aucun écart notable entre le modèle et la cote."}
+                </div>
+              </div>
+            )}
+            {(d.repos?.domicile != null || d.repos?.exterieur != null) && (
+              <div className="mt-2 text-xs text-slate-500" data-testid="rest-days">
+                Repos : {m.home_team?.tla || "Dom."} {d.repos.domicile ?? "?"} j · {m.away_team?.tla || "Ext."} {d.repos.exterieur ?? "?"} j
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      <TeamsComparison home={home} away={away} code={m.competition?.code} noteHist={noteHist} />
 
       {/* Market signals */}
       <div className="mt-6">
         <h2 className="font-head text-xl sm:text-2xl font-bold text-slate-50 mb-3 flex items-center gap-2">
-          <Swords className="w-5 h-5 text-emerald-400" /> Analyse des marchés
+          <Swords className="w-5 h-5 text-emerald-400" /> Marchés : buts et BTTS
         </h2>
         <MarketSignals data={d.signaux} />
       </div>

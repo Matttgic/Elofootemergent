@@ -6,7 +6,7 @@ import { ScoreBar } from "../components/ScoreBar";
 import { ScoreBreakdown } from "../components/ScoreBreakdown";
 import { DataUnavailable } from "../components/DataUnavailable";
 import { FormChips } from "../components/FormChips";
-import { frDate, frDateShort, resultColor } from "../lib/format";
+import { frDate, frDateShort, resultColor, scoreColor } from "../lib/format";
 import { Skeleton } from "../components/ui/skeleton";
 import { ArrowLeft, GitCompareArrows } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -33,37 +33,74 @@ export default function TeamPage() {
         <ArrowLeft className="w-4 h-4" /> Retour
       </Link>
 
-      <div className="card-surface rounded-xl p-5 mb-6 flex items-center gap-4">
-        {t.logo ? <img src={t.logo} alt="" className="w-16 h-16 object-contain" /> : <div className="w-16 h-16 rounded bg-slate-800" />}
-        <div className="flex-1 min-w-0">
-          <h1 className="font-head text-2xl font-extrabold text-slate-50 truncate">{t.nom}</h1>
-          <div className="flex items-center gap-2 mt-1">
-            <FormChips form={t.stats?.forme_recente} />
-            {t.classement && <span className="text-xs text-slate-400 font-stat">Classement #{t.classement.position} · {t.classement.points} pts</span>}
-          </div>
-          {t.elo && (
-            <div className="text-xs text-slate-400 mt-1.5" data-testid="team-elo">
-              Elo <b className="font-stat text-slate-100 text-sm">{t.elo.elo}</b>
-              {t.elo.rang && <> · {t.elo.rang}<sup>e</sup> sur {t.elo.sur} en {t.elo.championnat_nom || t.elo.championnat}</>}
-              <span className="text-slate-600"> · {t.elo.matchs} matchs notés</span>
-              {t.elo.forme_xg !== null && t.elo.forme_xg !== undefined && (
-                <span data-testid="team-xg"> · forme xG <b className="font-stat text-slate-100">
-                  {t.elo.forme_xg > 0 ? "+" : ""}{t.elo.forme_xg.toFixed(2).replace(".", ",")}</b> par match</span>
-              )}
+      <div className="card-surface rounded-xl p-5 mb-6">
+        <div className="flex items-center gap-4">
+          {t.logo ? <img src={t.logo} alt="" className="w-16 h-16 object-contain" /> : <div className="w-16 h-16 rounded bg-slate-800" />}
+          <div className="flex-1 min-w-0">
+            <h1 className="font-head text-2xl font-extrabold text-slate-50 truncate">{t.nom}</h1>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <FormChips form={t.stats?.forme_recente} />
+              {t.classement && <span className="text-xs text-slate-400 font-stat">Classement {t.classement.position}e · {t.classement.points} pts</span>}
             </div>
-          )}
-          <Link to={`/comparer?a=${code}-${t.team_id}`} data-testid="team-compare-link"
-            className="inline-flex items-center gap-1 mt-2 text-xs text-emerald-400 hover:text-emerald-300">
-            <GitCompareArrows className="w-3.5 h-3.5" /> Comparer avec une autre équipe
-          </Link>
+            <Link to={`/comparer?a=${code}-${t.team_id}`} data-testid="team-compare-link"
+              className="inline-flex items-center gap-1 mt-2 text-xs text-emerald-400 hover:text-emerald-300">
+              <GitCompareArrows className="w-3.5 h-3.5" /> Comparer avec une autre équipe
+            </Link>
+          </div>
         </div>
-        <ScoreBreakdown data={t.global} title="Score global" team={t.nom_court}>
-          <button><ScoreBadge score={t.global?.score} size="lg" /></button>
-        </ScoreBreakdown>
+
+        <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-5">
+          {t.elo ? (
+            <div className="rounded-lg bg-emerald-500/10 ring-1 ring-emerald-500/40 p-3" data-testid="team-elo">
+              <div className="text-[10px] uppercase tracking-wide text-emerald-300 font-semibold">Force Elo</div>
+              <div className="font-stat font-black text-2xl sm:text-3xl text-slate-50 leading-tight">{t.elo.elo}</div>
+              <div className="text-[11px] text-slate-400">
+                {t.elo.rang ? <>{t.elo.rang}<sup>e</sup> sur {t.elo.sur} · {t.elo.championnat_nom || t.elo.championnat}</> : `${t.elo.matchs} matchs notés`}
+              </div>
+            </div>
+          ) : <div />}
+          <div className="rounded-lg bg-slate-900/50 p-3" data-testid="team-xg">
+            <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Forme xG</div>
+            <div className="font-stat font-black text-2xl sm:text-3xl text-slate-100 leading-tight">
+              {t.elo?.forme_xg != null ? `${t.elo.forme_xg > 0 ? "+" : ""}${t.elo.forme_xg.toFixed(2).replace(".", ",")}` : "—"}
+            </div>
+            <div className="text-[11px] text-slate-500">{t.elo?.forme_xg != null ? "xG créés − concédés / match" : "xG indisponibles"}</div>
+          </div>
+          <ScoreBreakdown data={t.global} title="Note de forme" team={t.nom_court}>
+            <button className="rounded-lg bg-slate-900/50 p-3 text-left" data-testid="team-form-note">
+              <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Forme /100</div>
+              <div className="font-stat font-black text-2xl sm:text-3xl leading-tight" style={{ color: scoreColor(t.global?.score ?? 0) }}>
+                {t.global?.score ?? "—"}
+              </div>
+              <div className="text-[11px] text-slate-500 underline decoration-dotted underline-offset-2">10 derniers matchs · détail</div>
+            </button>
+          </ScoreBreakdown>
+        </div>
+        <p className="mt-3 text-[11px] text-slate-500">
+          Le pronostic des matchs s'appuie sur la force Elo et la forme xG ; la note de forme /100 est un résumé descriptif.
+        </p>
       </div>
 
+      {eloEvo.length > 1 && (
+        <div className="card-surface rounded-xl p-5 mb-6" data-testid="team-elo-chart">
+          <h3 className="font-head font-bold text-slate-100 mb-2">Évolution de la force Elo</h3>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={eloEvo}>
+              <CartesianGrid stroke="#1E293B" vertical={false} />
+              <XAxis dataKey="date" tick={{ fill: "#64748B", fontSize: 11 }} tickFormatter={frDateShort} minTickGap={40} />
+              <YAxis domain={["dataMin - 20", "dataMax + 20"]} tick={{ fill: "#64748B", fontSize: 11 }}
+                tickFormatter={(v) => Math.round(v)} width={44} />
+              <Tooltip contentStyle={{ background: "#0B0E14", border: "1px solid #1E293B", borderRadius: 8, color: "#fff" }}
+                labelFormatter={(d) => frDate(d + "T12:00:00", true)} formatter={(v) => [Math.round(v), "Elo"]} />
+              <Line type="monotone" dataKey="elo" stroke="#10B981" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      <h3 className="font-head font-bold text-slate-100 mb-2">Note de forme /100 · détail</h3>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-        {[["offensif", "Attaque"], ["defensif", "Défense"], ["forme", "Forme"]].map(([k, label]) => (
+        {[["offensif", "Attaque"], ["defensif", "Défense"], ["forme", "Résultats"]].map(([k, label]) => (
           <div key={k} className="card-surface rounded-xl p-4">
             <ScoreBreakdown data={t[k]} title={label} team={t.nom_court}>
               <div><ScoreBar label={`${label} · détail`} score={t[k]?.score} /></div>
@@ -83,29 +120,12 @@ export default function TeamPage() {
         </div>
       )}
 
-      {eloEvo.length > 1 && (
-        <div className="card-surface rounded-xl p-5 mb-6" data-testid="team-elo-chart">
-          <h3 className="font-head font-bold text-slate-100 mb-2">Évolution de l'Elo</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={eloEvo}>
-              <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
-              <XAxis dataKey="date" tick={{ fill: "#64748B", fontSize: 11 }} tickFormatter={frDateShort} minTickGap={40} />
-              <YAxis domain={["dataMin - 20", "dataMax + 20"]} tick={{ fill: "#64748B", fontSize: 11 }}
-                tickFormatter={(v) => Math.round(v)} width={44} />
-              <Tooltip contentStyle={{ background: "#0B0E14", border: "1px solid #1E293B", borderRadius: 8, color: "#fff" }}
-                labelFormatter={(d) => frDate(d + "T12:00:00", true)} formatter={(v) => [Math.round(v), "Elo"]} />
-              <Line type="monotone" dataKey="elo" stroke="#06B6D4" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
       {evo.length > 1 && (
         <div className="card-surface rounded-xl p-5 mb-6">
-          <h3 className="font-head font-bold text-slate-100 mb-2">Évolution du score par match</h3>
+          <h3 className="font-head font-bold text-slate-100 mb-2">Performance match par match (/100)</h3>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={evo}>
-              <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
+              <CartesianGrid stroke="#1E293B" vertical={false} />
               <XAxis dataKey="n" tick={{ fill: "#64748B", fontSize: 11 }} />
               <YAxis domain={[0, 100]} tick={{ fill: "#64748B", fontSize: 11 }} />
               <Tooltip contentStyle={{ background: "#0B0E14", border: "1px solid #1E293B", borderRadius: 8, color: "#fff" }}

@@ -330,7 +330,7 @@ BACKTEST = {
     "log_loss": [
         {"modele": "Fréquences domicile / nul / extérieur", "valeur": 1.073, "reussite_pct": 43.7},
         {"modele": "Ancienne note /100 du site (tranches d'écart)", "valeur": 1.038, "reussite_pct": 47.8},
-        {"modele": "Elo (site)", "valeur": 0.990, "reussite_pct": 51.8},
+        {"modele": "Elo", "valeur": 0.990, "reussite_pct": 51.8},
         {"modele": "Bet365 avant-match", "valeur": 0.971, "reussite_pct": 53.3},
         {"modele": "Pinnacle à la clôture", "valeur": 0.967, "reussite_pct": 53.5},
     ],
@@ -357,7 +357,7 @@ BACKTEST = {
             {"modele": "Note /100 seule", "valeur": 1.0220, "brier": 0.6126, "reussite_pct": 49.1},
             {"modele": "Note /100 : global, attaque, défense, forme", "valeur": 1.0201, "brier": 0.6112,
              "reussite_pct": 49.3},
-            {"modele": "Elo seul (site)", "valeur": 0.9915, "brier": 0.5916, "reussite_pct": 51.7},
+            {"modele": "Elo seul", "valeur": 0.9915, "brier": 0.5916, "reussite_pct": 51.7},
             {"modele": "Elo + note /100", "valeur": 0.9912, "brier": 0.5915, "reussite_pct": 51.8},
             {"modele": "Elo + les 4 notes", "valeur": 0.9909, "brier": 0.5912, "reussite_pct": 52.0},
             {"modele": "Mélange 90 % Elo / 10 % note", "valeur": 0.9910, "brier": 0.5912, "reussite_pct": 51.8},
@@ -371,7 +371,35 @@ BACKTEST = {
                       "légèrement le modèle (0,9824 → 0,9826). L'Elo contient déjà l'information de la note : "
                       "le modèle du site reste Elo (+ xG).",
     },
+    # Classement unifié : toutes les méthodes sur les MÊMES matchs (5 grands championnats,
+    # xG, notes et cotes disponibles). Indice de précision : 0 = simples fréquences
+    # domicile / nul / extérieur, 100 = cotes Pinnacle à la clôture (calculé dans elo_config).
+    "classement": {
+        "matchs": 7144,
+        "championnats": "Premier League, Liga, Serie A, Bundesliga, Ligue 1",
+        "methodes": [
+            {"id": "pinnacle", "modele": "Cotes Pinnacle à la clôture", "log_loss": 0.9673, "brier": 0.5750,
+             "reussite_pct": 54.3, "marche": True},
+            {"id": "bet365", "modele": "Cotes Bet365 avant-match", "log_loss": 0.9699, "brier": 0.5767,
+             "reussite_pct": 53.9, "marche": True},
+            {"id": "site", "modele": "Pronostic FootPulse (Elo + xG)", "log_loss": 0.9824, "brier": 0.5851,
+             "reussite_pct": 52.9, "site": True},
+            {"id": "elo", "modele": "Elo seul", "log_loss": 0.9915, "brier": 0.5914, "reussite_pct": 52.5},
+            {"id": "note", "modele": "Note de forme /100", "log_loss": 1.0221, "brier": 0.6128, "reussite_pct": 49.8},
+            {"id": "frequences", "modele": "Simples fréquences dom. / nul / ext.", "log_loss": 1.0739,
+             "brier": 0.6499, "reussite_pct": 43.7},
+        ],
+    },
 }
+
+
+def ranking_with_index(block):
+    """Ajoute à chaque méthode son indice de précision : part de l'écart de log-loss
+    entre les simples fréquences (0) et les cotes Pinnacle (100) qu'elle comble."""
+    ll = {m["id"]: m["log_loss"] for m in block["methodes"]}
+    low, high = ll["frequences"], ll["pinnacle"]
+    return {**block, "methodes": [{**m, "indice": round((low - m["log_loss"]) / (low - high) * 100)}
+                                  for m in block["methodes"]]}
 
 
 def elo_config():
@@ -395,5 +423,5 @@ def elo_config():
         "value": "Une « value » signale une issue dont la probabilité estimée dépasse d'au moins 5 % celle "
                  "qu'implique la cote du bookmaker. Sur l'historique, ces écarts n'ont pas été rentables : "
                  "les bookmakers restent plus précis que le modèle.",
-        "backtest": BACKTEST,
+        "backtest": {**BACKTEST, "classement": ranking_with_index(BACKTEST["classement"])},
     }

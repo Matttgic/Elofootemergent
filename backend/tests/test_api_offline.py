@@ -242,7 +242,11 @@ def test_search_and_config(api):
     assert all(j["team_logo"].startswith("https://crests.example/") for j in found["resultats"])
     conf = api.get("/api/scoring/config").json()
     assert {"equipes", "joueurs", "elo"} == set(conf)
-    assert conf["elo"]["backtest"]["log_loss"][2]["modele"] == "Elo (site)"
+    assert conf["elo"]["backtest"]["log_loss"][2]["modele"] == "Elo"
+    ranking = conf["elo"]["backtest"]["classement"]["methodes"]
+    site = next(m for m in ranking if m.get("site"))
+    assert site["modele"].startswith("Pronostic FootPulse") and site["indice"] == 86
+    assert {m["id"]: m["indice"] for m in ranking}["frequences"] == 0 and ranking[0]["indice"] == 100
     notes_bt = conf["elo"]["backtest"]["notes"]
     assert [r["modele"] for r in notes_bt["log_loss"]][0] == "Note /100 seule" and notes_bt["conclusion"]
 

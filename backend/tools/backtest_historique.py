@@ -22,6 +22,11 @@ ces championnats, l'Elo seul et le modèle Elo + forme xG du site (référence :
 --notes : évalue la note /100 du site comme modèle 1N2 (écart des notes globales avant
 le match), seule ou ajoutée à l'Elo, sur les matchs où les deux notes existent
 (référence : 11 740 matchs, note 1,022 ; Elo 0,9915 ; Elo + note 0,9912 ; Pinnacle 0,970).
+
+--classement : toutes les méthodes sur les mêmes matchs (5 grands championnats où xG,
+notes et cotes existent), avec l'indice de précision de la page Méthode (0 = simples
+fréquences, 100 = Pinnacle ; référence : 7 144 matchs, pronostic du site 86, Elo 77,
+note /100 49, Bet365 98).
 """
 import argparse
 import csv
@@ -144,6 +149,7 @@ def main():
     ap.add_argument("--home-adv", type=float, default=elo.HOME_ADV)
     ap.add_argument("--xg", action="store_true", help="comparer aussi le modèle Elo + forme xG")
     ap.add_argument("--notes", action="store_true", help="évaluer la note /100 seule et le modèle Elo + note")
+    ap.add_argument("--classement", action="store_true", help="classer toutes les méthodes sur les mêmes matchs")
     args = ap.parse_args()
 
     rows = load()
@@ -153,6 +159,9 @@ def main():
         return
     if args.notes:
         backtest_notes(rows, pre, args.home_adv)
+        return
+    if args.classement:
+        backtest_ranking(rows, pre, args.home_adv)
         return
     preds = {"Fréquences dom/nul/ext": [], "Elo (site)": [], "Bet365 avant-match": [],
              "Moyenne clôture": [], "Pinnacle clôture": []}
@@ -263,6 +272,56 @@ def backtest_notes(rows, pre, home_adv):
     print(f"Note /100 — 8 championnats, saisons {TEST[0]} à {TEST[-1]}, matchs où les deux notes existent")
     for name, pairs in preds.items():
         print(f"  {name:24} {scores(pairs)}")
+
+
+def backtest_ranking(rows, pre, home_adv):
+    """Classement unifié : chaque méthode évaluée sur les mêmes matchs des 5 grands
+    championnats (xG, notes /100 et cotes disponibles)."""
+    from scoring import pre_match_ratings
+    attach_xg(rows)
+    xgf = elo.xg_form(rows)
+    by_season = {}
+    for m in rows:
+        by_season.setdefault((m["competition_code"], m["season"]), []).append(m)
+    notes = {}
+    for ms in by_season.values():
+        notes.update(pre_match_ratings(ms))
+
+    def feats(m):
+        rh, ra, _ = pre[m["match_id"]]
+        nh, na = notes[m["match_id"]]
+        return (rh - ra + home_adv) / 100, elo.xg_diff(*xgf["pre"][m["match_id"]]), (nh - na) / 10
+
+    def usable(m):
+        return (m["competition_code"] in US_LEAGUES and pre[m["match_id"]][2] >= elo.BURN_IN
+                and elo.xg_diff(*xgf["pre"][m["match_id"]]) is not None and m["match_id"] in notes
+                and m["b365"] and m["ps_close"])
+
+    variants = {"Pronostic FootPulse (Elo + xG)": (0, 1), "Elo seul": (0,), "Note de forme /100": (2,)}
+    preds = {name: [] for name in ["Fréquences", *variants, "Bet365 avant-match", "Pinnacle clôture"]}
+    for season in TEST:
+        train = [m for m in rows if SEASONS[0] < m["season"] < season and usable(m)]
+        ys = [2 - outcome(m) for m in train]              # 0 ext, 1 nul, 2 dom pour le logit
+        coefs = {name: elo.fit_ordered_logit([tuple(feats(m)[i] for i in idx) for m in train], ys)
+                 for name, idx in variants.items()}
+        base = [sum(outcome(m) == y for m in train) / len(train) for y in range(3)]
+        for m in rows:
+            if m["season"] != season or not usable(m):
+                continue
+            f, y = feats(m), outcome(m)
+            preds["Fréquences"].append((base, y))
+            for name, idx in variants.items():
+                c = coefs[name]
+                preds[name].append((list(elo.ordered_probs(sum(b * f[i] for b, i in zip(c["betas"], idx)), c)), y))
+            preds["Bet365 avant-match"].append((book(m["b365"]), y))
+            preds["Pinnacle clôture"].append((book(m["ps_close"]), y))
+
+    def log_loss(pairs):
+        return sum(-math.log(max(p[y], 1e-12)) for p, y in pairs) / len(pairs)
+    low, high = log_loss(preds["Fréquences"]), log_loss(preds["Pinnacle clôture"])
+    print(f"Classement — 5 grands championnats, saisons {TEST[0]} à {TEST[-1]}, mêmes matchs pour chaque méthode")
+    for name, pairs in sorted(preds.items(), key=lambda kv: log_loss(kv[1])):
+        print(f"  {name:32} indice {round((low - log_loss(pairs)) / (low - high) * 100):3d} · {scores(pairs)}")
 
 
 if __name__ == "__main__":
