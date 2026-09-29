@@ -9,7 +9,7 @@ from analytics import calibration, compact, comp_data, match_summary, stats_anal
 from core import db
 from football_client import get_token
 from ingest import COMPETITION_META, configured_codes, is_cup
-from jobs import ingest_state
+from jobs import catch_up_if_stale, ingest_state
 from player_scoring import analyze_player, player_scoring_config
 from routers.players import PLAYER_LEAGUES, top_players
 from scoring import paris_date, scoring_config
@@ -26,6 +26,7 @@ async def health():
 
 @router.get("/status")
 async def status():
+    rattrapage = await catch_up_if_stale()
     sync = await db.meta.find_one({"_id": "sync"}, {"_id": 0})
     nb = await db.matches.count_documents({})
     codes = configured_codes()
@@ -35,7 +36,7 @@ async def status():
         "token_present": bool(get_token()),
         "matchs_en_base": nb,
         "derniere_synchro": sync,
-        "synchronisation_en_cours": ingest_state["running"],
+        "synchronisation_en_cours": ingest_state["running"] or rattrapage,
         "frequence": "Résultats rafraîchis chaque heure (1 appel API) · analyse complète 1×/jour",
         "quota": f"≈ 24 appels/jour pour les résultats + {daily} pour l'analyse quotidienne — "
                  "très en deçà de la limite gratuite (10/min)",

@@ -214,6 +214,34 @@ def test_startup_without_internal_scheduler(api, monkeypatch):
     assert "match_id_1" in asyncio.run(server.db.matches.index_information())
 
 
+def test_catch_up_when_data_is_stale(api, monkeypatch):
+    """Rattrapage léger en arrière-plan si la synchro a plus de 2 h, au plus 1×/30 min."""
+    import jobs
+    import server
+    calls = []
+
+    async def fake_light():
+        calls.append(1)
+        return {"ok": True}
+
+    async def scenario(last_sync):
+        await server.db.meta.update_one({"_id": "sync"}, {"$set": {"last_sync": last_sync}})
+        started = await jobs.catch_up_if_stale()
+        await asyncio.sleep(0)   # laisse la tâche d'arrière-plan s'exécuter
+        return started
+
+    monkeypatch.setattr(jobs, "run_light_guarded", fake_light)
+    monkeypatch.setitem(jobs._catch_up, "last_attempt", None)
+    fresh = datetime.now(timezone.utc).isoformat()
+    old = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+    assert asyncio.run(scenario(old)) is False            # sans jeton : rien
+    monkeypatch.setenv("FOOTBALL_DATA_TOKEN", "jeton-test")
+    assert asyncio.run(scenario(fresh)) is False          # données récentes
+    assert asyncio.run(scenario(old)) is True and calls == [1]
+    assert asyncio.run(scenario(old)) is False            # déjà tenté il y a moins de 30 min
+    asyncio.run(server.db.meta.update_one({"_id": "sync"}, {"$set": {"last_sync": NOW.isoformat()}}))
+
+
 def test_sync_command_fails_loudly_without_token(api, capsys):
     """`python -m jobs light` renvoie un code d'erreur si le jeton manque (visible dans le cron)."""
     import jobs

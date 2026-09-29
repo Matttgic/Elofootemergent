@@ -33,6 +33,7 @@ export default function Home() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [statut, setStatut] = useState("tous");
+  const [dates, setDates] = useState([]);
   const [tri, setTri] = useState("heure");
   const [valueOnly, setValueOnly] = useState(false);
   const { favs } = useFavorites();
@@ -57,6 +58,13 @@ export default function Home() {
   }, [code, date]);
 
   useEffect(() => { loadMatches(); }, [loadMatches]);
+
+  // Dates ayant des matchs (pour proposer la journée précédente / suivante)
+  useEffect(() => {
+    api.get("/dates", { params: code ? { code } : {} }).then((r) => setDates(r.data)).catch(() => setDates([]));
+  }, [code]);
+  const nextDate = dates.find((d) => d > date);
+  const prevDate = [...dates].reverse().find((d) => d < date);
 
   const shiftDay = (delta) => {
     const d = new Date(date + "T00:00:00");
@@ -186,8 +194,25 @@ export default function Home() {
           <CalendarDays className="w-10 h-10 text-slate-600 mx-auto mb-3" />
           <div className="font-head text-xl font-bold text-slate-200">Aucun match ce jour</div>
           <p className="text-slate-500 text-sm mt-1">
-            Essayez une autre date{status?.matchs_en_base ? "" : " une fois les données synchronisées"}.
+            {nextDate || prevDate ? "Aller à la journée la plus proche :"
+              : `Essayez une autre date${status?.matchs_en_base ? "" : " une fois les données synchronisées"}.`}
           </p>
+          {(nextDate || prevDate) && (
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+              {prevDate && (
+                <Button variant="outline" onClick={() => setDate(prevDate)} data-testid="goto-prev-matchday"
+                  className="border-slate-700 capitalize">
+                  <ChevronLeft className="w-4 h-4" /> {frDate(prevDate + "T12:00:00")}
+                </Button>
+              )}
+              {nextDate && (
+                <Button onClick={() => setDate(nextDate)} data-testid="goto-next-matchday"
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white capitalize">
+                  {frDate(nextDate + "T12:00:00")} <ChevronRight className="w-4 h-4" />
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" data-testid="matches-grid">
