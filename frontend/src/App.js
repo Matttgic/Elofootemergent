@@ -30,8 +30,8 @@ function App() {
           <Route path="/comparer" element={<Compare />} />
         </Routes>
         <footer className="max-w-7xl mx-auto px-4 py-8 mt-8 text-center text-xs text-slate-600 border-t border-slate-800">
-          FootPulse Analytics Pro — Système de notation statistique. Données football-data.org.
-          Les signaux sont indicatifs et ne constituent en aucun cas des prédictions certaines.
+          FootPulse Analytics Pro — Pronostics statistiques (force Elo + forme xG). Données football-data.org, Understat, FotMob.
+          Les probabilités sont indicatives et ne constituent en aucun cas des prédictions certaines.
         </footer>
       </BrowserRouter>
       <ServerWakeBanner />

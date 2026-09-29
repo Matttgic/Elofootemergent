@@ -90,10 +90,11 @@ export default function Home() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="font-head text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-50">
-            Matchs & Analyse
+            Matchs & pronostics
           </h1>
           <p className="text-slate-400 text-sm sm:text-base mt-1">
-            Notes Elo, probabilités et analyse statistique des grands championnats européens.
+            Chaque match avec le <b className="text-slate-200">Pronostic FootPulse</b> (force Elo + forme xG),
+            la plus précise de nos méthodes. <Link to="/methodologie#classement" className="text-emerald-400 hover:text-emerald-300 whitespace-nowrap">Comment on le sait →</Link>
           </p>
         </div>
         {status?.token_present && (

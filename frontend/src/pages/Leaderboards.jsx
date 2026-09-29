@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import { ScoreBadge } from "../components/ScoreBadge";
+import { scoreColor } from "../lib/format";
 import { PlayerRow } from "../components/PlayerCard";
 import { FormChips } from "../components/FormChips";
 import { DataUnavailable } from "../components/DataUnavailable";
@@ -131,7 +131,7 @@ export default function Leaderboards() {
 
           <div className="flex items-center gap-2 mb-4 text-xs" data-testid="team-sort">
             <span className="text-slate-500">Trier par</span>
-            {[["elo", "Elo"], ["note", "Note /100"]].map(([k, l]) => (
+            {[["elo", "Force Elo"], ["note", "Forme /100"]].map(([k, l]) => (
               <button key={k} onClick={() => setTeamSort(k)} data-testid={`team-sort-${k}`}
                 className={`px-3 py-1 rounded-full font-medium ${teamSort === k ? "bg-cyan-500 text-white" : "bg-slate-800/60 text-slate-400"}`}>{l}</button>
             ))}
@@ -159,11 +159,15 @@ export default function Leaderboards() {
                     </div>
                     {t.elo && (
                       <div className="text-right shrink-0" data-testid={`lb-team-elo-${t.team_id}`}>
-                        <div className="font-stat font-bold text-sm text-slate-100 tabular-nums">{t.elo}</div>
+                        <div className={`font-stat font-bold tabular-nums ${teamSort === "elo" ? "text-base text-slate-50" : "text-sm text-slate-300"}`}>{t.elo}</div>
                         <div className="text-[9px] uppercase text-slate-500">Elo</div>
                       </div>
                     )}
-                    <ScoreBadge score={t.global} size="sm" />
+                    <div className="text-right shrink-0 w-10" data-testid={`lb-team-note-${t.team_id}`}>
+                      <div className={`font-stat font-bold tabular-nums ${teamSort === "note" ? "text-base" : "text-sm opacity-80"}`}
+                        style={{ color: t.global != null ? scoreColor(t.global) : undefined }}>{t.global ?? "—"}</div>
+                      <div className="text-[9px] uppercase text-slate-500">Forme</div>
+                    </div>
                   </Link>
                   <button data-testid={`fav-toggle-${t.team_id}`}
                     onClick={(e) => { e.preventDefault(); toggle({ team_id: t.team_id, nom: t.nom_court || t.nom, logo: t.logo, competition_code: t.competition_code }); }}
