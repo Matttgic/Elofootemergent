@@ -77,7 +77,7 @@ export function MatchCard({ match, index = 0 }) {
             <div className={`mt-3 rounded-lg px-3 py-2 border ${match.value ? "bg-amber-500/10 border-amber-500/40" : "bg-slate-800/40 border-slate-800"}`} data-testid={`${testid}-prediction`}>
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[10px] uppercase tracking-wide text-slate-500 font-head flex items-center gap-1.5">
-                  {finished ? "Probabilités avant-match" : "Probabilités"} · Elo
+                  {finished ? "Probabilités avant-match" : "Probabilités"} · {pred.modele || "Elo"}
                   <ValueBadge value={match.value} testid={`${testid}-value-badge`} />
                 </span>
                 <span className="text-[11px] font-stat text-slate-400" data-testid={`${testid}-elo`}

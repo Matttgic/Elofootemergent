@@ -13,7 +13,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from core import db
-from elo import BURN_IN, HOME_ADV, fit_outcome_model, outcome_probs, run_elo
+from elo import (BURN_IN, HOME_ADV, XG_MIN_MATCHES, fit_outcome_model, fit_outcome_model_xg, outcome_probs,
+                 run_elo, xg_diff, xg_form)
 from ingest import COMPETITION_META, configured_codes, is_cup
 from scoring import analyze_team
 
@@ -165,6 +166,9 @@ class EloData:
         self.ratings, self.pre = run["ratings"], run["pre"]
         self.history, self.league, self.played = run["history"], run["league"], run["played"]
         self.coefs = fit_outcome_model(matches, self.pre)
+        # 2e modèle, utilisé quand les deux équipes ont des xG récents (5 grands championnats)
+        self.xg = xg_form(matches)
+        self.coefs_xg = fit_outcome_model_xg(matches, self.pre, self.xg)
         # Championnat de la saison en cours : une équipe sortie des championnats suivis
         # (reléguée plus bas, par exemple) n'est plus classée avec son ancien championnat.
         self.current_league = {}
@@ -187,9 +191,11 @@ class EloData:
             return None
         rank = self.ranks.get(team_id)
         lg = self.current_league.get(team_id) or self.league.get(team_id)
+        form, n_xg = self.xg["teams"].get(team_id, (0.0, 0))
         return {"elo": round(self.ratings[team_id]), "matchs": self.played.get(team_id, 0),
                 "rang": rank[0] if rank else None, "sur": rank[1] if rank else None,
-                "championnat": lg, "championnat_nom": COMPETITION_META.get(lg, {}).get("nom")}
+                "championnat": lg, "championnat_nom": COMPETITION_META.get(lg, {}).get("nom"),
+                "forme_xg": round(form, 2) if n_xg >= XG_MIN_MATCHES else None, "matchs_xg": n_xg}
 
     def match_ratings(self, m):
         """(elo_dom, elo_ext, matchs_min) avant le match : figés s'il est terminé,
@@ -202,11 +208,29 @@ class EloData:
             return None
         return self.ratings[hid], self.ratings[aid], min(self.played[hid], self.played[aid])
 
+    def match_xg(self, m):
+        """(forme xG dom, forme xG ext) avant le match, ou None si l'une des équipes
+        n'a pas assez de matchs avec xG (le modèle Elo seul s'applique alors)."""
+        f = self.xg["pre"].get(m.get("match_id"))
+        if f is None:
+            hid = (m.get("home_team") or {}).get("id")
+            aid = (m.get("away_team") or {}).get("id")
+            (fh, nh), (fa, na) = self.xg["teams"].get(hid, (0.0, 0)), self.xg["teams"].get(aid, (0.0, 0))
+            f = (fh, nh, fa, na)
+        return (f[0], f[2]) if xg_diff(*f) is not None else None
+
+    def probs(self, m, rh, ra, coefs=None, coefs_xg=None):
+        """Probabilités 1N2 : modèle Elo + xG si les xG sont disponibles, Elo seul sinon."""
+        xg = self.match_xg(m)
+        if xg:
+            return outcome_probs(rh - ra, coefs_xg or self.coefs_xg, xg_diff=xg[0] - xg[1]), xg
+        return outcome_probs(rh - ra, coefs or self.coefs), None
+
 
 async def elo_data():
     async def load():
         proj = {"_id": 0, "match_id": 1, "competition_code": 1, "utc_date": 1, "status": 1,
-                "home_team.id": 1, "away_team.id": 1, "score.fullTime": 1}
+                "home_team.id": 1, "away_team.id": 1, "score.fullTime": 1, "xg": 1}
         current = await db.matches.find({"status": "FINISHED"}, proj).to_list(50000)
         older = await db.matches_history.find({"status": "FINISHED"}, proj).to_list(50000)
         ids = {m["match_id"] for m in current}
@@ -217,14 +241,17 @@ async def elo_data():
 
 
 def prediction(eld, m, home_name, away_name):
-    """Probabilités 1N2 du modèle Elo pour un match (None si une équipe est inconnue)."""
+    """Probabilités 1N2 du modèle (Elo, + forme xG quand elle est disponible) pour un
+    match ; None si une équipe est inconnue."""
     r = eld.match_ratings(m)
     if not r:
         return None
     rh, ra, n = r
-    ph, pn, pa = outcome_probs(rh - ra, eld.coefs)
+    (ph, pn, pa), xg = eld.probs(m, rh, ra)
     fav_home = ph >= pa
     return {
+        "modele": "Elo + xG" if xg else "Elo",
+        "xg_domicile": round(xg[0], 2) if xg else None, "xg_exterieur": round(xg[1], 2) if xg else None,
         "elo_domicile": round(rh), "elo_exterieur": round(ra), "avantage_terrain": round(HOME_ADV),
         "ecart": round(abs(rh + HOME_ADV - ra)),
         "domicile_pct": round(ph * 100, 1), "nul_pct": round(pn * 100, 1), "exterieur_pct": round(pa * 100, 1),
@@ -310,9 +337,10 @@ def _model_quality(eld, rated):
     test = [m for m in rated if m["match_id"] in eld.current_ids]
     train = [m for m in eld.matches if m["match_id"] not in eld.current_ids]
     coefs = fit_outcome_model(train, eld.pre)
+    coefs_xg = fit_outcome_model_xg(train, eld.pre, eld.xg)
     hors_echantillon = coefs["ajuste"]
     if not hors_echantillon:
-        coefs, train = eld.coefs, rated
+        coefs, coefs_xg, train = eld.coefs, eld.coefs_xg, rated
     if not test or not train:
         return None
     base_n = {y: sum(1 for m in train if m["match_id"] in eld.pre and _outcome(m) == y) for y in (0, 1, 2)}
@@ -332,7 +360,7 @@ def _model_quality(eld, rated):
 
     def model_probs(m):
         rh, ra, _ = eld.pre[m["match_id"]]
-        ph, pn, pa = outcome_probs(rh - ra, coefs)
+        (ph, pn, pa), _ = eld.probs(m, rh, ra, coefs, coefs_xg)
         return {0: pa, 1: pn, 2: ph}
 
     calib = {label: [0, 0.0, 0] for _, _, label in PROB_BUCKETS}   # matchs, proba moyenne, favori gagnant
@@ -346,6 +374,7 @@ def _model_quality(eld, rated):
         c[2] += 1 if _outcome(m) == fav_side else 0
     return {
         "matchs": len(test),
+        "avec_xg_pct": _pct(sum(1 for m in test if eld.match_xg(m)), len(test)),
         "hors_echantillon": hors_echantillon,
         "modele": scores(model_probs),
         "reference": scores(lambda m: base),

@@ -174,7 +174,7 @@ export default function MatchDetail() {
                 Probabilités du match <ValueBadge value={d.value} testid="detail-value-badge" />
               </h3>
               <div className="text-[11px] text-slate-500">
-                {d.signaux.probabilites.source === "Elo" ? "Modèle Elo" : "Loi de Poisson"}{finished ? " · avant le coup d'envoi" : ""}
+                {d.signaux.probabilites.source === "Elo" ? `Modèle ${d.prediction?.modele || "Elo"}` : "Loi de Poisson"}{finished ? " · avant le coup d'envoi" : ""}
               </div>
             </div>
             {d.fiabilite && (
@@ -201,17 +201,34 @@ export default function MatchDetail() {
               <span key={i} className="font-stat bg-slate-800 rounded px-2 py-0.5 text-slate-200">{s.score} <span className="text-slate-500">{s.pct}%</span></span>
             ))}
           </div>
-          {d.prediction && (
-            <div className="mt-3 pt-3 border-t border-slate-800 text-xs text-slate-400" data-testid="elo-note">
-              Elo : <b className="text-slate-200">{m.home_team?.shortName || "Dom."} {d.prediction.elo_domicile}</b>
-              {d.prediction.avantage_terrain ? <> + {d.prediction.avantage_terrain} à domicile = <b className="text-slate-200">
-                {d.prediction.elo_domicile + d.prediction.avantage_terrain}</b></> : null}
-              {" "}contre <b className="text-slate-200">{m.away_team?.shortName || "Ext."} {d.prediction.elo_exterieur}</b>
-              {" "}→ <b className="text-emerald-400">{d.prediction.favori}</b> favori de{" "}
-              <b className="text-slate-200">{d.prediction.ecart} pts</b>
-              {d.prediction.favori_pct < 45 ? " (match très ouvert)" : ""}.
-            </div>
-          )}
+          {d.prediction && (() => {
+            const p = d.prediction;
+            const homeName = m.home_team?.shortName || "Dom.", awayName = m.away_team?.shortName || "Ext.";
+            const eloHome = p.elo_domicile + (p.avantage_terrain || 0) >= p.elo_exterieur;
+            const fmt = (v) => `${v > 0 ? "+" : ""}${v.toFixed(2).replace(".", ",")}`;
+            return (
+              <div className="mt-3 pt-3 border-t border-slate-800 text-xs text-slate-400 space-y-1" data-testid="elo-note">
+                <div>
+                  Elo : <b className="text-slate-200">{homeName} {p.elo_domicile}</b>
+                  {p.avantage_terrain ? <> + {p.avantage_terrain} à domicile = <b className="text-slate-200">
+                    {p.elo_domicile + p.avantage_terrain}</b></> : null}
+                  {" "}contre <b className="text-slate-200">{awayName} {p.elo_exterieur}</b>
+                  {" "}(avantage Elo : {eloHome ? homeName : awayName}, {p.ecart} pts).
+                </div>
+                {p.xg_domicile !== null && p.xg_domicile !== undefined && (
+                  <div data-testid="xg-note">
+                    Forme xG (occasions créées − concédées par match, derniers matchs) :{" "}
+                    <b className="text-slate-200">{homeName} {fmt(p.xg_domicile)}</b> ·{" "}
+                    <b className="text-slate-200">{awayName} {fmt(p.xg_exterieur)}</b>.
+                  </div>
+                )}
+                <div>
+                  Favori du modèle : <b className="text-emerald-400">{p.favori}</b> ({Math.round(p.favori_pct)} %)
+                  {p.favori_pct < 45 ? ", match très ouvert" : ""}.
+                </div>
+              </div>
+            );
+          })()}
           {d.cotes && (
             <div className="mt-2 rounded-lg bg-slate-900/50 px-3 py-2" data-testid="detail-odds">
               <OddsLine cotes={d.cotes} value={d.value} />

@@ -220,5 +220,13 @@ async def run_ingest(db):
         logger.error("Ingestion joueurs FotMob échouée: %s", e)
         fmstats = {"ok": False}
 
+    try:
+        from xg_ingest import ingest_xg   # import local : xg_ingest dépend de ce module
+        xgstats = await ingest_xg(db, now)
+        logger.info("xG Understat : %s", xgstats)
+    except Exception as e:  # noqa: BLE001
+        logger.error("xG Understat échec : %s", e)
+        xgstats = {"ok": False}
+
     return {"ok": True, "synced_at": now.isoformat(), **stats,
-            "joueurs": pstats, "joueurs_fotmob": fmstats}
+            "joueurs": pstats, "joueurs_fotmob": fmstats, "xg": xgstats}

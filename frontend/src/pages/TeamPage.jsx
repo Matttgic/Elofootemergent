@@ -46,6 +46,10 @@ export default function TeamPage() {
               Elo <b className="font-stat text-slate-100 text-sm">{t.elo.elo}</b>
               {t.elo.rang && <> · {t.elo.rang}<sup>e</sup> sur {t.elo.sur} en {t.elo.championnat_nom || t.elo.championnat}</>}
               <span className="text-slate-600"> · {t.elo.matchs} matchs notés</span>
+              {t.elo.forme_xg !== null && t.elo.forme_xg !== undefined && (
+                <span data-testid="team-xg"> · forme xG <b className="font-stat text-slate-100">
+                  {t.elo.forme_xg > 0 ? "+" : ""}{t.elo.forme_xg.toFixed(2).replace(".", ",")}</b> par match</span>
+              )}
             </div>
           )}
           <Link to={`/comparer?a=${code}-${t.team_id}`} data-testid="team-compare-link"

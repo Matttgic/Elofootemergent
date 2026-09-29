@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from betting import (KELLY_CAP, clv_pct, kelly_fraction, match_fixture, settle_outcome,  # noqa: E402
                      simulate, team_similarity, value_bets, value_pick)
 from elo import (DEFAULT_LOGIT, fit_ordered_logit, fit_outcome_model, margin_multiplier,  # noqa: E402
-                 outcome_probs, run_elo)
+                 outcome_probs, run_elo, xg_diff, xg_form)
 from player_ingest import build_team_map  # noqa: E402
 from scoring import compute_defensif, compute_offensif  # noqa: E402
 from signals import _align_split, _poisson_probs, build_signals  # noqa: E402
@@ -133,6 +133,60 @@ def test_fit_outcome_model_needs_enough_matches():
     pre = run_elo(matches)["pre"]
     model = fit_outcome_model(matches, pre)
     assert model["ajuste"] is False and model["beta"] == DEFAULT_LOGIT["beta"]
+
+
+def test_xg_form_uses_only_past_matches():
+    ms = [_match(i, f"2026-08-{i:02d}T15:00:00Z", 1, 2, 1, 0) for i in range(1, 5)]
+    for m, (h, a) in zip(ms, [(2.0, 1.0), (1.0, 1.0), (3.0, 0.0), (0.5, 0.5)]):
+        m["xg"] = {"home": h, "away": a}
+    f = xg_form(ms, half_life=1)          # chaque match compte deux fois plus que le précédent
+    assert f["pre"][1] == (0.0, 0, 0.0, 0)
+    assert f["pre"][2] == (1.0, 1, -1.0, 1)
+    dom, n, ext, _ = f["pre"][3]
+    assert abs(dom - (0.5 * 1.0 + 0.0) / 1.5) < 1e-9 and n == 2 and abs(ext + dom) < 1e-9
+    # modifier les xG d'un match ne change pas sa propre forme avant-match
+    ms[2]["xg"] = {"home": 0.0, "away": 5.0}
+    assert xg_form(ms, half_life=1)["pre"][3] == f["pre"][3]
+    assert f["teams"][1][1] == 4 and xg_diff(*f["pre"][3]) is None and xg_diff(*f["pre"][4]) is not None
+
+
+def test_two_feature_logit_recovers_coefficients():
+    rng = random.Random(8)
+    true = {"beta": 0.3, "beta_xg": 0.8, "theta_away": -0.7, "theta_draw": 0.45}
+    xs, ys = [], []
+    for _ in range(8000):
+        x1, x2 = rng.uniform(-3, 3), rng.gauss(0, 0.8)
+        eta = true["beta"] * x1 + true["beta_xg"] * x2
+        pa = 1 / (1 + math.exp(-(true["theta_away"] - eta)))
+        pna = 1 / (1 + math.exp(-(true["theta_draw"] - eta)))
+        u = rng.random()
+        xs.append((x1, x2))
+        ys.append(0 if u < pa else (1 if u < pna else 2))
+    fit = fit_ordered_logit(xs, ys)
+    for k, v in true.items():
+        assert abs(fit[k] - v) < 0.08, (k, fit)
+    # une meilleure forme xG à domicile augmente ses chances ; sans xG, modèle Elo seul
+    ph_plus = outcome_probs(0, fit, xg_diff=1.0)[0]
+    assert ph_plus > outcome_probs(0, fit, xg_diff=-1.0)[0]
+    assert outcome_probs(0, fit, xg_diff=None) == outcome_probs(0, fit)
+
+
+def test_attach_xg_by_team_names_and_date():
+    from xg_ingest import attach_xg_ops
+    mci = {"id": 65, "name": "Manchester City FC", "shortName": "Man City"}
+    mun = {"id": 66, "name": "Manchester United FC", "shortName": "Man United"}
+    fd = [dict(_match(1, "2026-09-20T15:00:00Z", 65, 66, 2, 1, home=mci, away=mun)),
+          dict(_match(2, "2026-10-25T16:30:00Z", 66, 65, 0, 0, home=mun, away=mci))]
+    us = [{"datetime": "2026-09-20 15:00:00", "h": {"title": "Manchester City"}, "a": {"title": "Manchester United"},
+           "xG": {"h": "2.1", "a": "0.9"}},
+          {"datetime": "2026-10-24 23:30:00", "h": {"title": "Manchester United"}, "a": {"title": "Manchester City"},
+           "xG": {"h": "0.7", "a": "1.2"}},                           # veille (fuseau) : rattaché
+          {"datetime": "2026-12-01 20:00:00", "h": {"title": "Manchester City"}, "a": {"title": "Manchester United"},
+           "xG": {"h": "1.0", "a": "1.0"}}]                            # aucun match ce jour-là
+    ops, missed = attach_xg_ops(us, fd)
+    got = {op._filter["match_id"]: op._doc["$set"]["xg"] for op in ops}
+    assert got == {1: {"home": 2.1, "away": 0.9, "source": "understat"},
+                   2: {"home": 0.7, "away": 1.2, "source": "understat"}} and missed == 1
 
 
 def test_goal_split_aligned_on_elo_keeps_total():
@@ -322,6 +376,15 @@ def test_psg_not_confused_with_paris_fc_whatever_the_order():
              {"id": 2, "name": "Paris FC", "shortName": "Paris FC", "tla": "PFC"}]
     for order in (teams, teams[::-1]):
         assert build_team_map(["Paris Saint Germain", "Paris FC"], order) == {"Paris Saint Germain": 1, "Paris FC": 2}
+
+
+def test_team_map_is_one_to_one_rennes_not_lens():
+    """« Rennes » ressemble plus à « Lens » qu'à « Stade Rennais FC 1901 » : chaque
+    équipe football-data ne peut être prise qu'une fois, la plus ressemblante d'abord."""
+    fd = [{"id": 546, "name": "Racing Club de Lens", "shortName": "Lens", "tla": "RCL"},
+          {"id": 529, "name": "Stade Rennais FC 1901", "shortName": "Stade Rennais", "tla": "REN"}]
+    assert build_team_map(["Lens", "Rennes"], fd) == {"Lens": 546, "Rennes": 529}
+    assert build_team_map(["Rennes", "Lens"], list(reversed(fd))) == {"Lens": 546, "Rennes": 529}
 
 
 def test_odds_names_with_aliases():

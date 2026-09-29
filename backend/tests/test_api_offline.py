@@ -66,6 +66,11 @@ def dataset():
     table = [{"position": p, "team": team(t), "playedGames": 8, "won": 0, "draw": 0, "lost": 0,
               "points": 30 - p, "goalsFor": 0, "goalsAgainst": 0, "goalDifference": 0}
              for p, t in enumerate(sorted(strength, key=lambda t: -strength[t]), 1)]
+    for m in matches:
+        if m["competition_code"] == "PL" and m["status"] == "FINISHED":
+            h, a = m["home_team"]["id"], m["away_team"]["id"]
+            m["xg"] = {"home": round(strength[h] * rng.uniform(0.6, 1.4), 2),
+                       "away": round(strength[a] * rng.uniform(0.6, 1.4), 2), "source": "understat"}
     players = [{"player_id": str(100 + i), "competition_code": "PL", "season": 2026,
                 "nom": f"Joueur {i}", "position": ["F", "M", "D", "GK"][i % 4],
                 "team_title": team(1 + i % 20)["shortName"], "team_id": 1 + i % 20,
@@ -74,7 +79,7 @@ def dataset():
                 "yellow": i % 3, "red": 0, "last_synced_at": iso(NOW)} for i in range(40)]
     form = {"form_score": {"score": 55, "composantes": []},
             "resume": {"matchs": 6, "buts": 3, "passes": 1, "minutes": 480}, "matchs": []}
-    bets = [{"_id": m["match_id"], "modele": 3, "competition_code": "PL", "tranche": "50–60 %", "ecart": 70,
+    bets = [{"_id": m["match_id"], "modele": 4, "competition_code": "PL", "tranche": "50–60 %", "ecart": 70,
              "fav_side": "home", "fav_odds": 1.8 + 0.1 * k, "model_prob": 0.6, "is_value": k % 2 == 0,
              "home_odds": 1.8 + 0.1 * k, "draw_odds": 3.6, "away_odds": 4.2, "bookmaker": "betclic_fr",
              "value": {"issue": "nul", "cote": 3.6, "proba_pct": 30.0, "avantage_pct": 8.0} if k % 2 == 0 else None,
@@ -93,7 +98,9 @@ def dataset():
                             "utc_date": iso(kick), "match_date": kick.date().isoformat(), "matchday": r + 1,
                             "status": "FINISHED", "home_team": team(h), "away_team": team(a),
                             "score": {"fullTime": {"home": min(6, int(rng.expovariate(1 / strength[h]))),
-                                                   "away": min(6, int(rng.expovariate(1 / strength[a])))}}})
+                                                   "away": min(6, int(rng.expovariate(1 / strength[a])))}},
+                            "xg": {"home": round(strength[h] * rng.uniform(0.6, 1.4), 2),
+                                   "away": round(strength[a] * rng.uniform(0.6, 1.4), 2)}})
     # équipe de la saison précédente absente cette saison (reléguée hors des championnats suivis)
     gone = {"id": 21, "name": "Ipswich Town FC", "shortName": "Ipswich Town", "tla": "IPS",
             "crest": "https://crests.example/21.png"}
@@ -160,6 +167,8 @@ def test_matches_of_the_day(api):
         assert isinstance(m["domicile"]["global"], int) and isinstance(m["exterieur"]["global"], int)
         p = m["prediction"]
         assert abs(p["domicile_pct"] + p["nul_pct"] + p["exterieur_pct"] - 100) < 0.5
+        # xG disponibles pour les deux équipes : modèle Elo + xG
+        assert p["modele"] == "Elo + xG" and p["xg_domicile"] is not None
         assert p["fiable"] is True and p["matchs_min"] >= 10     # saison précédente comprise
         assert p["favori_pct"] == max(p["domicile_pct"], p["exterieur_pct"])
         # cotes figées de la journée 9 : affichées, « value » seulement si l'avantage atteint 5 %
@@ -244,6 +253,7 @@ def test_stats_and_simulation(api):
     assert abs(fav["victoires_pct"] + fav["nuls_pct"] + fav["defaites_pct"] - 100) < 0.5
     q = st["modele"]
     assert q["matchs"] == st["echantillon_saison"] and 0 < q["modele"]["log_loss"] < 2
+    assert q["avec_xg_pct"] > 90
     assert sum(c["matchs"] for c in q["calibration"]) == q["matchs"]
     sim = api.get("/api/bets/simulation").json()
     # journée 8 jouée (10 paris réglés), journée 9 à venir (10 en attente)
@@ -266,7 +276,7 @@ def test_settle_backfills_value_from_snapshot_odds(api):
 
     async def scenario():
         db = server.db
-        base = {"modele": 3, "status": "pending", "commence_time": "2099-01-01T15:00:00Z", "tranche": "40–50 %",
+        base = {"modele": 4, "status": "pending", "commence_time": "2099-01-01T15:00:00Z", "tranche": "40–50 %",
                 "probas": {"domicile": 38.3, "nul": 28.6, "exterieur": 33.1}}
         await db.bets.insert_many([
             {**base, "_id": 990001, "home_odds": 3.35, "draw_odds": 3.03, "away_odds": 2.03},
@@ -320,7 +330,7 @@ def test_snapshot_creates_v3_bets_and_tracks_latest_odds(api, monkeypatch):
 
     res, created, other = asyncio.run(scenario())
     assert res == {"ok": True, "crees": 1, "cotes_actualisees": 9}
-    assert created["modele"] == 3 and created["status"] == "pending" and created["bookmaker"] == "winamax_fr"
+    assert created["modele"] == 4 and created["status"] == "pending" and created["bookmaker"] == "winamax_fr"
     assert abs(sum(created["probas"].values()) - 100) < 0.5
     if created["value"]:
         assert created["value"]["avantage_pct"] >= 5
@@ -458,6 +468,12 @@ def test_light_and_full_ingest_write_matches_in_bulk(api, monkeypatch):
     monkeypatch.setattr(ingest, "ingest_players", no_players)
     monkeypatch.setattr(ingest, "ingest_fotmob_players", no_players)
 
+    async def no_xg(db, now=None):
+        return {"appels": 0}
+
+    import xg_ingest
+    monkeypatch.setattr(xg_ingest, "ingest_xg", no_xg)
+
     async def scenario():
         db = server.db
         await db.meta.delete_one({"_id": "history"})
@@ -476,6 +492,44 @@ def test_light_and_full_ingest_write_matches_in_bulk(api, monkeypatch):
     assert light["ok"] and light["matchs_maj"] == 2          # BL1 hors des compétitions suivies
     assert full["ok"] and full["matchs"] == 2 and full["historique"] == 2
     assert ids == {70001, 70002, 70004} and hist == 2
+
+
+def test_xg_ingest_attaches_understat_xg(api, monkeypatch):
+    """xG Understat rattachés aux matchs (saison en cours et précédentes) par équipes
+    et date ± 1 jour ; saisons précédentes chargées une seule fois."""
+    import server
+    import xg_ingest
+    calls = []
+
+    async def fake_fetch(league, season):
+        calls.append((league, season))
+        coll = server.db.matches if season == xg_ingest.current_season() else server.db.matches_history
+        docs = await coll.find({"competition_code": "PL", "status": "FINISHED",
+                                "home_team.name": {"$exists": True}}).to_list(1000)
+        # noms « à la Understat » (sans « FC »), heure décalée d'un jour pour la moitié
+        return [{"datetime": (m["utc_date"][:10] if i % 2 else
+                              (datetime.fromisoformat(m["utc_date"][:10]) - timedelta(days=1)).date().isoformat())
+                 + " 20:00:00",
+                 "h": {"title": m["home_team"]["name"].replace(" FC", "")},
+                 "a": {"title": m["away_team"]["name"].replace(" FC", "")},
+                 "xG": {"h": "1.5", "a": "0.5"}} for i, m in enumerate(docs)]
+
+    async def scenario():
+        db = server.db
+        await db.meta.delete_one({"_id": "xg"})
+        first = await xg_ingest.ingest_xg(db)
+        again = await xg_ingest.ingest_xg(db)
+        cur = await db.matches.count_documents({"xg.source": "understat", "xg.home": 1.5})
+        hist = await db.matches_history.count_documents({"xg.source": "understat", "xg.home": 1.5})
+        return first, again, cur, hist
+
+    monkeypatch.setattr(xg_ingest, "fetch_league_matches", fake_fetch)
+    monkeypatch.setattr(xg_ingest, "current_season", lambda: NOW.year)
+    monkeypatch.setenv("COMPETITIONS", "PL")
+    first, again, cur, hist = asyncio.run(scenario())
+    assert first["rattaches"] == cur + hist and cur == 80 and hist >= 190 and first["non_rattaches"] == 0
+    # 2e synchro : seule la saison en cours est relue
+    assert again["appels"] == 1 and calls.count(("EPL", NOW.year)) == 2
 
 
 def test_sync_command_fails_loudly_without_token(api, capsys):

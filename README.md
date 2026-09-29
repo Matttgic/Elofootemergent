@@ -20,7 +20,8 @@ backend/                   FastAPI + MongoDB (Motor), routes préfixées /api
   server.py                point d'entrée (uvicorn server:app) : app, CORS, planification
   core.py                  configuration (.env), journalisation, connexion MongoDB
   analytics.py             chargement d'un championnat + analyses d'équipes, Elo, stats, cache
-  elo.py                   notes Elo (toutes compétitions, saisons précédentes) + modèle 1N2
+  elo.py                   notes Elo (toutes compétitions, saisons précédentes), forme xG, modèle 1N2
+  xg_ingest.py             xG par match (Understat) rattachés aux matchs football-data
   jobs.py                  synchronisations (ingestion puis règlement / prise des paris)
   routers/                 matches.py (matchs, équipes, recherche), players.py, stats.py (stats, paris)
   scoring.py, signals.py   notation /100 des équipes (forme), signaux (Poisson aligné sur l'Elo)
@@ -155,6 +156,14 @@ championnats (2021-22 à 2026-27, chaque saison prédite sans regarder l'avenir)
 Les bookmakers restent plus précis : parier le favori du modèle aux cotes Bet365 aurait
 rendu −4,6 %, les paris « value » (avantage ≥ 5 %) −10 %. Pour reproduire :
 `cd backend && python -m tools.backtest_historique` (réseau requis).
+
+**Forme xG** (5 grands championnats) : le modèle ajoute l'écart entre expected goals
+créés et concédés de chaque équipe (xG Understat, moyenne à demi-vie de 15 matchs), dès
+que les deux équipes ont au moins 3 matchs avec xG ; ailleurs, l'Elo seul s'applique.
+Sur 7 800 matchs de ces championnats : log-loss 0,992 → **0,983** (Brier 0,592 → 0,586),
+soit 38 % de l'écart avec Pinnacle (0,968) comblé. Reproduire :
+`python -m tools.backtest_historique --xg`. Les xG sont rattachés aux matchs à chaque
+synchro complète (5 appels Understat ; les 2 saisons précédentes une seule fois).
 
 ## Tests
 
