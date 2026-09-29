@@ -4,6 +4,9 @@ Application web (en français) d'analyse statistique des matchs des championnats
 notes sur 100 des équipes et des joueurs, signaux de marché (plus/moins de buts, les deux
 équipes marquent…), statistiques de calibration et simulation de paris sur cotes réelles.
 
+**En ligne : https://footpulses.vercel.app** — API : https://footpulse-api.onrender.com
+(`/api/health`, `/api/status`).
+
 Ce n'est **pas** un outil de prédiction certaine : tous les calculs sont déterministes,
 fondés uniquement sur des données réelles, et une donnée absente est affichée comme
 « Donnée indisponible », jamais inventée. La méthodologie complète est exposée par
@@ -84,7 +87,22 @@ en arrière-plan (quelques minutes, à cause de la limite de 10 requêtes/min).
 | Frontend (build React statique) | Vercel, offre Hobby | `frontend/vercel.json` |
 | API FastAPI | Render, offre gratuite | `render.yaml` |
 | Base de données | MongoDB Atlas, cluster M0 (512 Mo, largement suffisant) | — |
-| Synchronisations planifiées | GitHub Actions (~900 min/mois sur les 2 000 gratuites d'un dépôt privé) | `.github/workflows/sync.yml` |
+| Synchronisations planifiées | GitHub Actions (minutes illimitées pour un dépôt public) | `.github/workflows/sync.yml` |
+
+### Production actuelle
+
+| Élément | Adresse / réglage |
+| --- | --- |
+| Site | https://footpulses.vercel.app (Vercel, *Settings > Domains*) |
+| API | https://footpulse-api.onrender.com (Render, service `footpulse-api`, région Frankfurt) |
+| Base | MongoDB Atlas M0 `Cluster0`, AWS Frankfurt, base `footpulse` |
+| Synchros | GitHub Actions `sync.yml` : toutes les heures à hh:05, analyse complète à 04:30 UTC |
+| `CORS_ORIGINS` (Render) | `https://footpulses.vercel.app` |
+
+Changer l'adresse du site implique de mettre à jour `CORS_ORIGINS` sur Render (plusieurs
+adresses séparées par des virgules), sinon le site s'affiche sans données.
+
+### Mise en place pas à pas
 
 1. **MongoDB Atlas** : créer un cluster M0 (région AWS Frankfurt `eu-central-1`, comme
    l'API Render), un utilisateur de base de données, et autoriser
@@ -92,15 +110,16 @@ en arrière-plan (quelques minutes, à cause de la limite de 10 requêtes/min).
    Récupérer la chaîne de connexion `mongodb+srv://…`.
 2. **Render** : *New > Blueprint*, choisir ce dépôt (`render.yaml` est détecté). Renseigner
    `MONGO_URL`, `FOOTBALL_DATA_TOKEN` et, une fois le frontend en ligne, `CORS_ORIGINS`.
-   Noter l'URL de l'API (ex. `https://footpulse-api.onrender.com`) ; `/api/health` doit
+   Noter l'URL de l'API (ici `https://footpulse-api.onrender.com`) ; `/api/health` doit
    répondre `{"ok": true}`.
 3. **GitHub** : *Settings > Secrets and variables > Actions*, ajouter les secrets
    `MONGO_URL`, `FOOTBALL_DATA_TOKEN` et, si besoin, `ODDS_API_KEY`. Puis *Actions >
    Synchronisation des données > Run workflow* (mode `full`) pour remplir la base
    (quelques minutes). Ensuite, le workflow tourne seul toutes les heures et à 04:30 UTC.
 4. **Vercel** : *Add New > Project*, importer ce dépôt avec **Root Directory** = `frontend`
-   et la variable `REACT_APP_BACKEND_URL` = URL Render. Mettre ensuite l'URL Vercel dans
-   `CORS_ORIGINS` sur Render.
+   et la variable `REACT_APP_BACKEND_URL` = URL Render. Choisir l'adresse du site dans
+   *Settings > Domains* (ici `footpulses.vercel.app`), puis la mettre dans `CORS_ORIGINS`
+   sur Render.
 
 Limites à connaître : l'API Render gratuite se met en veille après 15 min sans visite
 (premier chargement ~30-60 s) ; les analyses se rafraîchissent au plus 10 min après
