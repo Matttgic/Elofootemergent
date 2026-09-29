@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from betting import (KELLY_CAP, clv_pct, kelly_fraction, match_fixture, settle_outcome,  # noqa: E402
                      simulate, team_similarity, value_bets, value_pick)
 from elo import (DEFAULT_LOGIT, fit_ordered_logit, fit_outcome_model, margin_multiplier,  # noqa: E402
-                 outcome_probs, run_elo, xg_diff, xg_form)
+                 ordered_probs, outcome_probs, run_elo, xg_diff, xg_form)
 from player_ingest import build_team_map  # noqa: E402
 from scoring import compute_defensif, compute_offensif, pre_match_ratings, standings_positions  # noqa: E402
 from signals import _align_split, _poisson_probs, build_signals  # noqa: E402
@@ -169,6 +169,10 @@ def test_two_feature_logit_recovers_coefficients():
     ph_plus = outcome_probs(0, fit, xg_diff=1.0)[0]
     assert ph_plus > outcome_probs(0, fit, xg_diff=-1.0)[0]
     assert outcome_probs(0, fit, xg_diff=None) == outcome_probs(0, fit)
+    # coefficients génériques (modèles à k variables, ex. Elo + note /100)
+    assert fit["betas"] == [fit["beta"], fit["beta_xg"]]
+    eta = fit["beta"] * 0.6 + fit["beta_xg"] * 0.5
+    assert ordered_probs(eta, fit) == outcome_probs(0, fit, xg_diff=0.5)
 
 
 def test_attach_xg_by_team_names_and_date():

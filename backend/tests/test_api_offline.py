@@ -243,6 +243,8 @@ def test_search_and_config(api):
     conf = api.get("/api/scoring/config").json()
     assert {"equipes", "joueurs", "elo"} == set(conf)
     assert conf["elo"]["backtest"]["log_loss"][2]["modele"] == "Elo (site)"
+    notes_bt = conf["elo"]["backtest"]["notes"]
+    assert [r["modele"] for r in notes_bt["log_loss"]][0] == "Note /100 seule" and notes_bt["conclusion"]
 
 
 def test_stats_and_simulation(api):
@@ -255,6 +257,12 @@ def test_stats_and_simulation(api):
     assert q["matchs"] == st["echantillon_saison"] and 0 < q["modele"]["log_loss"] < 2
     assert q["avec_xg_pct"] > 90
     assert sum(c["matchs"] for c in q["calibration"]) == q["matchs"]
+    # la note /100 seule, évaluée comme modèle sur les mêmes matchs de la saison
+    qn = q["note_100"]
+    # (saison précédente trop courte ici pour ajuster la note seule : ajustement sur la saison)
+    assert 0 < qn["matchs"] <= q["matchs"] and qn["hors_echantillon"] is False
+    for k in ("modele", "note", "reference"):
+        assert 0 < qn[k]["log_loss"] < 2 and 0 < qn[k]["brier"] < 1.5
     # écart des notes /100 avant-match, saison précédente comprise, selon le terrain
     notes = st["notes"]
     assert notes["disponible"] and notes["echantillon"] > notes["echantillon_saison"] > 0

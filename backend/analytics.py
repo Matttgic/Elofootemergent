@@ -13,8 +13,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
 from core import db
-from elo import (BURN_IN, HOME_ADV, XG_MIN_MATCHES, fit_outcome_model, fit_outcome_model_xg, outcome_probs,
-                 run_elo, xg_diff, xg_form)
+from elo import (BURN_IN, HOME_ADV, MIN_FIT_MATCHES, XG_MIN_MATCHES, fit_ordered_logit, fit_outcome_model,
+                 fit_outcome_model_xg, ordered_probs, outcome_probs, run_elo, xg_diff, xg_form)
 from ingest import COMPETITION_META, configured_codes, is_cup
 from scoring import MIN_HISTORY, analyze_team, pre_match_ratings
 
@@ -337,6 +337,7 @@ def _compute_stats(eld, leagues):
         items.append((abs(diff), res, score))
 
     n_home = sum(home_out.values())
+    note_pre = _pre_match_notes(eld, leagues)
     return {
         "disponible": len(rated) > 0,
         "echantillon": len(rated),
@@ -345,8 +346,8 @@ def _compute_stats(eld, leagues):
         "avantage_domicile": {"domicile_pct": _pct(home_out[2], n_home), "nul_pct": _pct(home_out[1], n_home),
                               "exterieur_pct": _pct(home_out[0], n_home)},
         "par_ecart_elo": _gap_rows(ELO_BUCKETS, items),
-        "notes": _note_stats(eld, leagues),
-        "modele": _model_quality(eld, rated),
+        "notes": _note_stats(eld, note_pre),
+        "modele": _model_quality(eld, rated, note_pre),
         "note": "Statistiques descriptives : chaque match terminé est comparé aux notes Elo que les deux "
                 "équipes avaient avant le coup d'envoi (avantage du terrain de "
                 f"{int(HOME_ADV)} points compris), une fois au moins {BURN_IN} matchs joués par chacune. "
@@ -354,11 +355,10 @@ def _compute_stats(eld, leagues):
     }
 
 
-def _note_stats(eld, leagues):
-    """Résultat selon l'écart des notes globales /100 avant le coup d'envoi, calculées
-    comme sur le site : championnat par championnat et saison par saison, sur les seuls
-    matchs antérieurs (classement reconstitué à la date du match). Séparé selon que
-    l'équipe la mieux notée joue à domicile ou à l'extérieur."""
+def _pre_match_notes(eld, leagues):
+    """{match_id: (note_dom, note_ext)} : notes globales /100 avant le coup d'envoi,
+    calculées comme sur le site, championnat par championnat et saison par saison, sur
+    les seuls matchs antérieurs (classement reconstitué à la date du match)."""
     seasons = defaultdict(list)
     for m in eld.matches:
         if m.get("competition_code") in leagues:
@@ -367,7 +367,12 @@ def _note_stats(eld, leagues):
     pre = {}
     for ms in seasons.values():
         pre.update(pre_match_ratings(ms))
+    return pre
 
+
+def _note_stats(eld, pre):
+    """Résultat selon l'écart des notes globales /100 avant le coup d'envoi, séparé selon
+    que l'équipe la mieux notée joue à domicile ou à l'extérieur."""
     fav = {v: {0: 0, 1: 0, 2: 0} for v in NOTE_VENUES}
     items = {v: [] for v in NOTE_VENUES}
     this_season = 0
@@ -396,6 +401,27 @@ def _note_stats(eld, leagues):
     }
 
 
+def _note_quality(eld, test, note_pre, scores, model_probs, base):
+    """La note /100 seule comme modèle 1N2 (logit ordonné sur l'écart des notes avant le
+    match, ajusté sur les saisons précédentes), comparée au modèle du site sur les mêmes
+    matchs de la saison (ceux où les deux équipes avaient déjà une note)."""
+    sample = [m for m in test if m["match_id"] in note_pre]
+    fit_on = [m for m in eld.matches if m["match_id"] not in eld.current_ids and m["match_id"] in note_pre]
+    hors_echantillon = len(fit_on) >= MIN_FIT_MATCHES
+    if not hors_echantillon:
+        fit_on = sample
+    if len(fit_on) < 30 or not sample:
+        return None
+    coefs = fit_ordered_logit([_note_x(note_pre[m["match_id"]]) for m in fit_on], [_outcome(m) for m in fit_on])
+
+    def note_probs(m):
+        ph, pn, pa = ordered_probs(coefs["beta"] * _note_x(note_pre[m["match_id"]]), coefs)
+        return {0: pa, 1: pn, 2: ph}
+    return {"matchs": len(sample), "hors_echantillon": hors_echantillon,
+            "modele": scores(model_probs, sample), "note": scores(note_probs, sample),
+            "reference": scores(lambda m: base, sample)}
+
+
 async def note_gap_history(note_home, note_away):
     """Ce qui s'est passé dans les matchs passés où l'écart de notes /100 était du même
     ordre, l'équipe la mieux notée jouant sur le même terrain. None si notes égales ou
@@ -412,10 +438,16 @@ async def note_gap_history(note_home, note_away):
     return {**row, "ecart": gap, "terrain": venue}
 
 
-def _model_quality(eld, rated):
+def _note_x(notes):
+    """Variable du modèle « note /100 » : écart des notes globales, par dizaine."""
+    return (notes[0] - notes[1]) / 10
+
+
+def _model_quality(eld, rated, note_pre):
     """Log-loss, score de Brier et taux de réussite des probabilités 1N2 sur les matchs
-    de la saison en cours, comparés aux simples fréquences domicile / nul / extérieur.
-    Coefficients ajustés sur les saisons précédentes seulement quand elles suffisent."""
+    de la saison en cours, comparés aux simples fréquences domicile / nul / extérieur et
+    aux probabilités tirées de la seule note /100. Coefficients ajustés sur les saisons
+    précédentes seulement quand elles suffisent."""
     test = [m for m in rated if m["match_id"] in eld.current_ids]
     train = [m for m in eld.matches if m["match_id"] not in eld.current_ids]
     coefs = fit_outcome_model(train, eld.pre)
@@ -429,15 +461,15 @@ def _model_quality(eld, rated):
     tot = sum(base_n.values()) or 1
     base = {y: base_n[y] / tot for y in base_n}
 
-    def scores(probs_of):
+    def scores(probs_of, sample=test):
         ll = br = hit = 0.0
-        for m in test:
+        for m in sample:
             p = probs_of(m)
             y = _outcome(m)
             ll -= math.log(max(p[y], 1e-12))
             br += sum((p[k] - (1 if k == y else 0)) ** 2 for k in (0, 1, 2))
             hit += 1 if max((0, 1, 2), key=lambda k: p[k]) == y else 0
-        n = len(test)
+        n = len(sample)
         return {"log_loss": round(ll / n, 4), "brier": round(br / n, 4), "reussite_pct": round(hit / n * 100, 1)}
 
     def model_probs(m):
@@ -457,6 +489,7 @@ def _model_quality(eld, rated):
     return {
         "matchs": len(test),
         "avec_xg_pct": _pct(sum(1 for m in test if eld.match_xg(m)), len(test)),
+        "note_100": _note_quality(eld, test, note_pre, scores, model_probs, base),
         "hors_echantillon": hors_echantillon,
         "modele": scores(model_probs),
         "reference": scores(lambda m: base),

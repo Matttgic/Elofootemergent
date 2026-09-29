@@ -121,6 +121,39 @@ export default function Methodologie() {
                   </table>
                 </div>
               )}
+              {c.elo.backtest.notes && (
+                <div className="mt-4" data-testid="methodo-backtest-notes">
+                  <p className="text-xs text-slate-500 mb-2">
+                    La note /100 comme modèle, seule ou combinée à l'Elo : {c.elo.backtest.notes.matchs.toLocaleString("fr-FR")} matchs
+                    des mêmes championnats, dès que les deux équipes ont une note.
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-[10px] uppercase text-slate-500 text-left border-b border-slate-800">
+                          <th className="py-1.5 pr-2">Méthode</th>
+                          <th className="py-1.5 px-2 text-right whitespace-nowrap">Log-loss</th>
+                          <th className="py-1.5 px-2 text-right">Brier</th>
+                          <th className="py-1.5 pl-2 text-right">Réussite</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {c.elo.backtest.notes.log_loss.map((r) => (
+                          <tr key={r.modele} className={`border-b border-slate-800/60 ${r.modele.includes("(site)") ? "text-cyan-300 font-semibold" : "text-slate-300"}`}>
+                            <td className="py-1.5 pr-2">{r.modele}</td>
+                            <td className="py-1.5 px-2 text-right font-stat">{r.valeur.toFixed(4)}</td>
+                            <td className="py-1.5 px-2 text-right font-stat">{r.brier.toFixed(4)}</td>
+                            <td className="py-1.5 pl-2 text-right font-stat">{r.reussite_pct.toFixed(1)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed mt-2" data-testid="methodo-notes-conclusion">
+                    {c.elo.backtest.notes.conclusion}
+                  </p>
+                </div>
+              )}
               <div className="mt-4 rounded-lg bg-amber-500/5 border border-amber-500/30 p-3 flex items-start gap-2.5">
                 <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                 <div className="text-xs text-slate-300 space-y-1">
