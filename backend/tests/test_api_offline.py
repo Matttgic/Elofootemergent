@@ -77,6 +77,8 @@ def dataset():
     bets = [{"_id": m["match_id"], "modele": 3, "competition_code": "PL", "tranche": "50–60 %", "ecart": 70,
              "fav_side": "home", "fav_odds": 1.8 + 0.1 * k, "model_prob": 0.6, "is_value": k % 2 == 0,
              "home_odds": 1.8 + 0.1 * k, "draw_odds": 3.6, "away_odds": 4.2, "bookmaker": "betclic_fr",
+             "value": {"issue": "nul", "cote": 3.6, "proba_pct": 30.0, "avantage_pct": 8.0} if k % 2 == 0 else None,
+             "cotes_recentes": {"domicile": 1.8, "nul": 3.4, "exterieur": 4.4} if k < 10 else None,
              "commence_time": m["utc_date"], "status": "pending"}
             for k, m in enumerate(x for x in matches if x["competition_code"] == "PL" and x["matchday"] in (8, 9))]
     # saison précédente (19 journées) : historique Elo et confrontations directes
@@ -227,6 +229,57 @@ def test_stats_and_simulation(api):
     assert sim["disponible"] and sim["en_attente"] == 10 and sim["annules"] == 0
     assert sim["strategies"]["favori"]["total"]["paris"] == 10
     assert [b["tranche"] for b in sim["strategies"]["favori"]["par_ecart"]] == ["50–60 %"]
+    # stratégie value : l'issue repérée (ici le nul) sur les 5 matchs concernés
+    val = sim["strategies"]["value"]
+    assert val["total"]["paris"] == 5
+    # valeur de clôture : cote obtenue vs dernière cote relevée
+    assert sim["strategies"]["favori"]["clv"]["paris"] == 10
+    assert sim["strategies"]["value"]["clv"]["moyenne_pct"] == round((3.6 / 3.4 - 1) * 100, 2)
+
+
+def test_bets_lists(api):
+    pending = api.get("/api/bets").json()["paris"]
+    settled = api.get("/api/bets", params={"statut": "regles"}).json()["paris"]
+    assert len(pending) == 10 and len(settled) == 10
+    assert [p["date"] for p in pending] == sorted(p["date"] for p in pending)
+    first = settled[0]
+    assert first["domicile"]["nom"] and first["score"]["home"] is not None and first["statut"] in ("won", "lost")
+    assert first["favori"]["issue"] == "domicile" and first["favori"]["clv_pct"] is not None
+    assert all(p["score"] is None for p in pending)
+
+
+def test_snapshot_creates_v3_bets_and_tracks_latest_odds(api, monkeypatch):
+    """Prise de paris avec des cotes simulées : un nouveau pari v3 (issue value comprise)
+    pour un match sans pari, et mise à jour des cotes récentes des paris déjà figés."""
+    import server
+    from routers import stats as stats_router
+
+    async def scenario():
+        db = server.db
+        upcoming = await db.matches.find({"competition_code": "PL", "matchday": 9}, {"_id": 0}).to_list(20)
+        target = upcoming[0]
+        await db.bets.delete_one({"_id": target["match_id"]})
+
+        async def fake_odds(sport):
+            return [{"home_team": m["home_team"]["name"], "away_team": m["away_team"]["name"],
+                     "commence_time": m["utc_date"], "home_odds": 2.5, "draw_odds": 3.3, "away_odds": 3.1,
+                     "bookmaker": "winamax_fr"} for m in upcoming]
+
+        monkeypatch.setattr(stats_router, "fetch_odds", fake_odds)
+        monkeypatch.setattr(stats_router, "ODDS_SPORT", {"PL": "soccer_epl"})
+        monkeypatch.setenv("ODDS_API_KEY", "cle-test")
+        res = await stats_router.snapshot_bets()
+        created = await db.bets.find_one({"_id": target["match_id"]})
+        other = await db.bets.find_one({"_id": upcoming[1]["match_id"]})
+        return res, created, other
+
+    res, created, other = asyncio.run(scenario())
+    assert res == {"ok": True, "crees": 1, "cotes_actualisees": 9}
+    assert created["modele"] == 3 and created["status"] == "pending" and created["bookmaker"] == "winamax_fr"
+    assert abs(sum(created["probas"].values()) - 100) < 0.5
+    if created["value"]:
+        assert created["value"]["avantage_pct"] >= 5
+    assert other["cotes_recentes"]["domicile"] == 2.5 and other["cotes_recentes"]["bookmaker"] == "winamax_fr"
 
 
 def test_analyses_cached_then_refreshed_after_sync(api):

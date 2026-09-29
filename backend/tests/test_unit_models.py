@@ -8,8 +8,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from betting import (KELLY_CAP, kelly_fraction, match_fixture, settle_outcome,  # noqa: E402
-                     simulate, team_similarity, value_pick)
+from betting import (KELLY_CAP, clv_pct, kelly_fraction, match_fixture, settle_outcome,  # noqa: E402
+                     simulate, team_similarity, value_bets, value_pick)
 from elo import (DEFAULT_LOGIT, fit_ordered_logit, fit_outcome_model, margin_multiplier,  # noqa: E402
                  outcome_probs, run_elo)
 from player_ingest import build_team_map  # noqa: E402
@@ -141,6 +141,25 @@ def test_goal_split_aligned_on_elo_keeps_total():
     assert abs((P["domicile"] - P["exterieur"]) - 0.30) < 1e-3
     # total inchangé : plus de 2.5 buts identique (aux troncatures de la grille près)
     assert abs(P["over25"] - _poisson_probs(1.3, 1.3)["over25"]) < 1e-3
+
+
+def test_closing_line_value():
+    assert clv_pct(2.2, 2.0) == 10.0 and clv_pct(1.8, 2.0) == -10.0
+    assert clv_pct(2.0, None) is None and clv_pct(None, 2.0) is None
+
+
+def test_value_strategy_settles_the_chosen_issue():
+    bets = [
+        {"status": "lost", "resultat": "draw", "commence_time": "t1", "tranche": "40–50 %",
+         "value": {"issue": "nul", "cote": 3.4, "proba_pct": 33.0}},     # favori perdu, mais nul joué gagné
+        {"status": "won", "resultat": "home", "commence_time": "t2", "tranche": "50–60 %",
+         "value": {"issue": "exterieur", "cote": 4.0, "proba_pct": 28.0}},
+        {"status": "void", "resultat": None, "commence_time": "t3", "value": {"issue": "nul", "cote": 3.0, "proba_pct": 35.0}},
+        {"status": "won", "resultat": "home", "commence_time": "t4", "value": None},
+    ]
+    out = value_bets(bets)
+    assert [(b["status"], b["fav_odds"]) for b in out] == [("won", 3.4), ("lost", 4.0)]
+    assert simulate(out)["mise_fixe"]["gain_net"] == 1.4
 
 
 def test_value_pick_needs_a_real_edge():
