@@ -1,0 +1,11 @@
+{
+  "name": "footpulse-e2e",
+  "private": true,
+  "description": "Tests navigateur (Playwright) du site sur une API simulée",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

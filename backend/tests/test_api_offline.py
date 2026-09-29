@@ -204,6 +204,19 @@ def test_players(api):
     assert api.post("/api/players/form", json={"ids": "100"}).status_code == 422
 
 
+def test_compare_two_teams(api):
+    d = api.get("/api/compare", params={"a": "PL-1", "b": "PL-4"}).json()
+    assert d["a"]["team_id"] == 1 and d["b"]["team_id"] == 4 and d["a"]["elo"]["championnat"] == "PL"
+    for key in ("a_recoit", "b_recoit"):
+        p = d[key]
+        assert abs(p["domicile_pct"] + p["nul_pct"] + p["exterieur_pct"] - 100) < 0.5
+    # l'avantage du terrain profite à celle qui reçoit
+    assert d["a_recoit"]["domicile_pct"] > d["b_recoit"]["exterieur_pct"]
+    assert d["confrontations"] and d["a"]["elo_historique"]
+    assert api.get("/api/compare", params={"a": "PL-1", "b": "PL"}).status_code == 422
+    assert api.get("/api/compare", params={"a": "PL-1", "b": "PL-4242"}).status_code == 404
+
+
 def test_search_and_config(api):
     s = api.get("/api/search", params={"q": "man"}).json()
     assert {e["nom_court"] for e in s["equipes"]} == {"Manchester City", "Manchester United"}

@@ -9,6 +9,7 @@ import Stats from "./pages/Stats";
 import PlayerPage from "./pages/PlayerPage";
 import Search from "./pages/Search";
 import Methodologie from "./pages/Methodologie";
+import Compare from "./pages/Compare";
 import { Toaster } from "./components/ui/sonner";
 import { ServerWakeBanner } from "./components/ServerWakeBanner";
 
@@ -26,6 +27,7 @@ function App() {
           <Route path="/joueur/:id" element={<PlayerPage />} />
           <Route path="/recherche" element={<Search />} />
           <Route path="/methodologie" element={<Methodologie />} />
+          <Route path="/comparer" element={<Compare />} />
         </Routes>
         <footer className="max-w-7xl mx-auto px-4 py-8 mt-8 text-center text-xs text-slate-600 border-t border-slate-800">
           FootPulse Analytics Pro — Système de notation statistique. Données football-data.org.
