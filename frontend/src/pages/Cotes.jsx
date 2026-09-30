@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { Skeleton } from "../components/ui/skeleton";
-import { Coins, History, Search, ShieldAlert, Users } from "lucide-react";
+import { Coins, History, Search, ShieldAlert, TrendingUp, Users } from "lucide-react";
 
 const PRECISIONS = [3, 5, 10, 15];
 const EXEMPLE = { domicile: "1.30", nul: "5.75", exterieur: "10.5", dom: "Paris SG", ext: "Marseille" };
@@ -68,6 +68,9 @@ function Examples({ rows, testid }) {
         <History className="w-3.5 h-3.5" /> Les {rows.length} plus récents
       </summary>
       <div className="mt-2 space-y-1">
+        <div className="grid grid-cols-[4.5rem_1fr_auto] gap-2 text-[10px] uppercase tracking-wide text-slate-600">
+          <span>Date</span><span>Match</span><span>Cotes Pinnacle 1 / N / 2</span>
+        </div>
         {rows.map((e, i) => (
           <div key={i} className="grid grid-cols-[4.5rem_1fr_auto] gap-2 items-center text-xs py-1 border-b border-slate-800 last:border-0">
             <span className="text-slate-500 font-stat">{frDay(e.date)}</span>
@@ -121,6 +124,86 @@ function TeamResult({ e, cote, testid }) {
           <Examples rows={e.exemples} testid={`${testid}-exemples`} />
         </>
       )}
+    </div>
+  );
+}
+
+// Résumé : chaque source vue depuis le match demandé (1 / N / 2), puis tous ces matchs
+// mis ensemble (chacun compté une fois) et la tendance qui en ressort.
+function Tendance({ d, test }) {
+  const t = d.tendance;
+  if (!t) return null;
+  const known = (e) => (e?.trouvee && e.matchs > 0 ? e : null);
+  const home = known(d.equipe_domicile), away = known(d.equipe_exterieur);
+  const nomDom = d.equipe_domicile?.trouvee ? d.equipe_domicile.nom : "Domicile";
+  const nomExt = d.equipe_exterieur?.trouvee ? d.equipe_exterieur.nom : "Extérieur";
+  const sim = d.similaires;
+  const rows = [];
+  if (sim.matchs) {
+    rows.push({ key: "similaires", label: "Tous les matchs à ces cotes", n: sim.matchs,
+      v: [sim.issues.domicile.matchs, sim.issues.nul.matchs, sim.issues.exterieur.matchs] });
+  }
+  if (home) {
+    rows.push({ key: "domicile", label: `${home.nom} à une cote proche de ${fmt(d.cotes.domicile, 2)}`, n: home.matchs,
+      v: [home.victoires, home.nuls, home.defaites], sub: ["victoires", "nuls", "défaites"] });
+  }
+  if (away) {
+    rows.push({ key: "exterieur", label: `${away.nom} à une cote proche de ${fmt(d.cotes.exterieur, 2)}`, n: away.matchs,
+      v: [away.defaites, away.nuls, away.victoires], sub: ["défaites", "nuls", "victoires"] });
+  }
+  const top = (v) => v.indexOf(Math.max(...v));
+  const issueName = (k) => [`victoire de ${nomDom}`, "match nul", `victoire de ${nomExt}`][k]
+    .replace("victoire de Domicile", "victoire à domicile").replace("victoire de Extérieur", "victoire à l'extérieur");
+  const tops = rows.map((r) => top(r.v));
+  const accord = tops.every((k) => k === tops[0]);
+  const tv = [t.domicile, t.nul, t.exterieur];
+  const tk = top(tv);
+  const cell = (x, n, sub) => (
+    <div className="text-right">
+      <div className="font-stat text-slate-100">{fmtInt(x)} <span className="text-slate-500 text-[11px]">{fmt(100 * x / n, 0)} %</span></div>
+      {sub && <div className="text-[10px] text-slate-600">{sub}</div>}
+    </div>
+  );
+  return (
+    <div className="card-surface rounded-xl p-5 border border-emerald-500/20" data-testid="cotes-tendance">
+      <h2 className="font-head text-lg font-bold text-slate-50 flex items-center gap-2 mb-3">
+        <TrendingUp className="w-5 h-5 text-emerald-400" /> Résumé et tendance
+      </h2>
+      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-2 items-center text-sm">
+        <div />
+        {[`1 · ${nomDom}`, "N · Nul", `2 · ${nomExt}`].map((h) => (
+          <div key={h} className="text-[10px] uppercase tracking-wide text-slate-500 text-right max-w-[5.5rem] truncate">{h}</div>
+        ))}
+        {rows.map((r) => (
+          <div key={r.key} className="contents" data-testid={`tendance-${r.key}`}>
+            <div className="text-xs text-slate-300 leading-tight">{r.label} <span className="text-slate-500">({fmtInt(r.n)} matchs)</span></div>
+            {r.v.map((x, j) => <div key={j}>{cell(x, r.n, r.sub?.[j])}</div>)}
+          </div>
+        ))}
+        <div className="contents" data-testid="tendance-ensemble">
+          <div className="text-xs font-semibold text-emerald-300 leading-tight border-t border-slate-700 pt-2">
+            Tout mis ensemble <span className="text-slate-500 font-normal">({fmtInt(t.matchs)} matchs)</span>
+          </div>
+          {tv.map((x, j) => (
+            <div key={j} className={`border-t border-slate-700 pt-2 ${j === tk ? "text-emerald-300" : ""}`}>{cell(x, t.matchs)}</div>
+          ))}
+        </div>
+      </div>
+      <p className="mt-4 text-sm text-slate-200" data-testid="tendance-phrase">
+        Tendance générale : <b className="text-emerald-300">{issueName(tk)}</b> ({fmt(100 * tv[tk] / t.matchs, 0)} % des matchs).{" "}
+        <span className="text-slate-400">
+          {rows.length > 1 && (accord
+            ? `Les ${rows.length} sources vont dans le même sens.`
+            : `Les sources ne sont pas d'accord : ${rows.map((r, i) => `${r.label.split(" à une cote")[0].replace("Tous les matchs à ces cotes", "les cotes")} → ${issueName(tops[i])}`).join(" ; ")}.`)}
+        </span>
+      </p>
+      <p className="mt-2 text-[11px] text-slate-500">
+        Chaque match n'est compté qu'une fois ; pour une équipe, sa victoire compte pour son côté et sa défaite pour
+        l'autre. Les matchs aux cotes voisines, bien plus nombreux, pèsent le plus.
+        {test && <> Testée à l'aveugle sur {fmtInt(test.matchs)} matchs, cette tendance désigne la bonne issue aussi souvent
+          que la cote seule ({fmt(test.reussite_pct)} % contre {fmt(test.reussite_cote_pct)} %), et parier quand elle trouve
+          la cote trop haute rend <b className="text-red-400">{signed(test.roi_pct)}</b>.</>}
+      </p>
     </div>
   );
 }
@@ -311,33 +394,50 @@ export default function Cotes() {
 
       {d && !loading && (
         <div className="space-y-4 mb-6" data-testid="cotes-result">
-          <div className="card-surface rounded-xl p-5" data-testid="cotes-similaires">
-            <h2 className="font-head text-lg font-bold text-slate-50">
-              {fmtInt(s.matchs)} matchs aux cotes similaires <span className="text-slate-500 font-normal text-sm">(± {s.precision_pct} % sur chaque cote)</span>
+          <div className="card-surface rounded-xl p-5 border border-emerald-500/20" data-testid="cotes-similaires">
+            <h2 className="font-head text-xl font-bold text-slate-50">
+              {fmtInt(s.matchs)} matchs avec ces cotes
             </h2>
             <p className="text-xs text-slate-500 mt-0.5 mb-3">
-              Cotes sans la marge du bookmaker ({fmt(d.marge_pct)} %) : {fmt(d.probas_cotes.domicile, 0)} % / {fmt(d.probas_cotes.nul, 0)} % / {fmt(d.probas_cotes.exterieur, 0)} %.
-              {" "}Exactement les mêmes cotes : {s.identiques} match{s.identiques > 1 ? "s" : ""}.
+              Matchs passés où les cotes Pinnacle étaient à ± {s.precision_pct} % des tiennes
+              {s.identiques ? <> (dont {s.identiques} aux cotes exactement identiques)</> : null}.
             </p>
-            {d.marge_pct > 8 && (
-              <p className="text-[11px] text-amber-400 mb-3">
-                Marge de {fmt(d.marge_pct)} % : c'est bien plus que Pinnacle (≈ 3 %). La comparaison se fait sans la marge ;
-                ton « rendement à ta cote » en tient compte, lui.
-              </p>
-            )}
             {s.matchs > 0 ? (
               <>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {ISSUES.map(([k, l]) => <IssueCell key={k} label={l} v={s.issues[k]} cote={d.cotes[k]} />)}
+                <div className="grid grid-cols-3 gap-2 text-center" data-testid="cotes-resume">
+                  {[["domicile", "Victoire à domicile", "text-emerald-300"], ["nul", "Match nul", "text-slate-200"],
+                    ["exterieur", "Victoire à l'extérieur", "text-cyan-300"]].map(([k, l, c]) => (
+                    <div key={k} className="rounded-lg bg-slate-900/60 py-3 px-1" data-testid={`resume-${k}`}>
+                      <div className={`font-stat font-black text-3xl sm:text-4xl leading-none ${c}`}>{fmtInt(s.issues[k].matchs)}</div>
+                      <div className="text-[11px] text-slate-300 mt-1.5">{l}</div>
+                      <div className="font-stat text-sm text-slate-400 mt-0.5">{fmt(s.issues[k].reel_pct, 0)} %</div>
+                    </div>
+                  ))}
                 </div>
-                <p className="text-[11px] text-slate-500 mt-3">
-                  <span className="inline-block w-2 h-2 bg-emerald-500/80 rounded-sm mr-1" />réel
-                  <span className="inline-block w-0.5 h-2.5 bg-amber-300 mx-1 ml-3 align-middle" />annoncé par les cotes.
-                  « Rendement à ta cote » : ce que rapporterait un pari de 1 € si la fréquence passée se répétait
-                  exactement (± la marge d'erreur, qui suffit souvent à changer le signe).
-                </p>
-                {!s.suffisant && <p className="mt-2 text-[11px] text-amber-400">Moins de 30 matchs comparables : élargis la précision.</p>}
+                {d.marge_pct > 5 && s.cotes_pinnacle && (
+                  <p className="text-[11px] text-slate-400 mt-3" data-testid="cotes-equivalent">
+                    Tes cotes {[d.cotes.domicile, d.cotes.nul, d.cotes.exterieur].map((c) => fmt(c, 2)).join(" / ")} contiennent{" "}
+                    <b className="text-amber-300">{fmt(d.marge_pct)} % de marge</b> (Pinnacle ≈ 3 %). Pour les mêmes chances,
+                    Pinnacle affichait ≈ <b className="text-slate-200 font-stat">{s.cotes_pinnacle.map((c) => fmt(c, 2)).join(" / ")}</b> :
+                    ce sont ces matchs-là qui sont comptés (aucun match Pinnacle n'a des cotes aussi basses sur les trois issues).
+                  </p>
+                )}
+                {!s.suffisant && <p className="mt-2 text-[11px] text-amber-400">Moins de 30 matchs : élargis la précision, un ou deux résultats de plus changent tout.</p>}
                 <Examples rows={s.exemples} testid="similaires-exemples" />
+                <details className="mt-3" data-testid="similaires-details">
+                  <summary className="cursor-pointer text-xs text-emerald-400 hover:text-emerald-300">
+                    Rentable ou pas ? Détail par issue
+                  </summary>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+                    {ISSUES.map(([k, l]) => <IssueCell key={k} label={l} v={s.issues[k]} cote={d.cotes[k]} />)}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-3">
+                    <span className="inline-block w-2 h-2 bg-emerald-500/80 rounded-sm mr-1" />réel
+                    <span className="inline-block w-0.5 h-2.5 bg-amber-300 mx-1 ml-3 align-middle" />annoncé par les cotes.
+                    « Rendement à ta cote » : ce que rapporterait un pari de 1 € si la fréquence passée se répétait
+                    exactement (± la marge d'erreur, qui suffit souvent à changer le signe).
+                  </p>
+                </details>
               </>
             ) : (
               <p className="text-sm text-slate-400">Aucun match aussi proche : élargis la précision.</p>
@@ -353,6 +453,8 @@ export default function Cotes() {
               <TeamResult e={d.equipe_exterieur} cote={d.cotes.exterieur} testid="equipe-exterieur-result" />
             </div>
           )}
+
+          <Tendance d={d} test={meta?.test?.tendance} />
         </div>
       )}
 
