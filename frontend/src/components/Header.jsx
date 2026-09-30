@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { Activity, Search, Trophy, BarChart3, BookOpen, PieChart, GitCompareArrows } from "lucide-react";
+import { Activity, Search, Trophy, BarChart3, BookOpen, PieChart, GitCompareArrows, Coins } from "lucide-react";
 import { Input } from "../components/ui/input";
 
 export function Header() {
@@ -18,6 +18,7 @@ export function Header() {
     { to: "/classements", label: "Classements", icon: Trophy },
     { to: "/stats", label: "Stats", icon: PieChart },
     { to: "/comparer", label: "Comparer", icon: GitCompareArrows },
+    { to: "/cotes", label: "Cotes", icon: Coins },
     { to: "/methodologie", label: "Méthode", icon: BookOpen },
   ];
 

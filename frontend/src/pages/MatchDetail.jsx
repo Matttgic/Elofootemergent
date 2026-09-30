@@ -271,6 +271,12 @@ export default function MatchDetail() {
                     ? `Écart modèle / cote : ${d.value.proba_pct}% estimés contre ${Math.round(100 / d.value.cote)}% implicites (avantage théorique ${d.value.avantage_pct}%). Signal indicatif, non rentable sur l'historique.`
                     : "Aucun écart notable entre le modèle et la cote."}
                 </div>
+                {d.cotes.nul && (
+                  <Link data-testid="detail-odds-history" className="mt-1.5 inline-block text-[11px] text-emerald-400 hover:text-emerald-300"
+                    to={`/cotes?${new URLSearchParams({ domicile: d.cotes.domicile, nul: d.cotes.nul, exterieur: d.cotes.exterieur })}`}>
+                    Comment ont fini les matchs passés à ces cotes →
+                  </Link>
+                )}
               </div>
             )}
             {(d.repos?.domicile != null || d.repos?.exterieur != null) && (
