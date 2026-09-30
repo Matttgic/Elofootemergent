@@ -22,6 +22,7 @@ backend/                   FastAPI + MongoDB (Motor), routes préfixées /api
   analytics.py             chargement d'un championnat + analyses d'équipes, Elo, stats, cache
   elo.py                   notes Elo (toutes compétitions, saisons précédentes), forme xG, modèle 1N2
   xg_ingest.py             xG par match (Understat) rattachés aux matchs football-data
+  cotes_ingest.py          cotes football-data.co.uk rattachées aux matchs (fiche match)
   jobs.py                  synchronisations (ingestion puis règlement / prise des paris)
   routers/                 matches.py (matchs, équipes, recherche), players.py, stats.py (stats, paris),
                            cotes.py (page « Cotes »)
@@ -46,7 +47,7 @@ memory/PRD.md              journal produit : objectifs, décisions, historique d
 | Understat | statistiques joueurs (xG/xA) des 5 grands championnats | aucune |
 | FotMob | statistiques joueurs Portugal et Pays-Bas | aucune |
 | [The Odds API](https://the-odds-api.com/) (offre gratuite) | cotes 1N2 pour la simulation de paris | `ODDS_API_KEY` (optionnelle) |
-| [football-data.co.uk](https://www.football-data.co.uk/) | historique des cotes Pinnacle (page Cotes, fichier figé du dépôt) et backtests | aucune |
+| [football-data.co.uk](https://www.football-data.co.uk/) | historique des cotes Pinnacle (page Cotes, fichier figé du dépôt), cotes des matchs de la saison (fiche match) et backtests | aucune |
 
 Synchronisation automatique (UTC) : rafraîchissement léger des résultats chaque heure à
 hh:05 (1 appel API), analyse complète chaque jour à 04:30 (saison, classements, joueurs,
@@ -262,6 +263,19 @@ Test à l'aveugle (chaque saison jouée avec les seules saisons précédentes, 1
 | Rejouer les tranches de cotes rentables par le passé | 43 056 paris, −1,8 % |
 | Combiner cote, cotes voisines et équipes (poids réglés sur le passé) | poids de l'historique : 0 chaque saison |
 | Tendance de la page (cotes voisines + équipes, tout mis ensemble) | bonne issue 50,3 % comme la cote seule ; paris −3,8 % |
+
+La page et la fiche match montrent aussi les **scores exacts les plus fréquents** de ces matchs
+(et, avec les équipes, de tous les matchs mis ensemble, score vu du côté de chaque équipe).
+
+**Fiche match « Selon les cotes historiques »** (`GET /api/match/{id}/cotes-historiques`) : le même
+décompte, les scores les plus fréquents, les équipes et la tendance, directement sur la fiche d'un
+match. Les cotes viennent de football-data.co.uk (sans clé), rattachées à chaque synchro complète
+par `cotes_ingest.py` : moyenne des bookmakers avant le match (`fixtures.csv`, publié en fin de
+semaine pour le week-end et en début de semaine pour le milieu), puis à la clôture une fois le match
+joué (fichier de la saison). Championnats : Premier League, Championship, Liga, Serie A, Bundesliga,
+Ligue 1, Liga Portugal, Eredivisie et Brésil (pas les coupes). Les noms d'équipes football-data.co.uk,
+ceux de l'historique, sont appris sur les résultats (même méthode que les xG). Sans ces cotes, la
+fiche utilise celles de la simulation de paris (The Odds API) quand il y en a.
 
 Les cotes Pinnacle sont presque parfaitement calibrées : l'historique ne dit rien de plus
 qu'elles. Seuls les très gros favoris (cote < 1,35) frôlent l'équilibre, les grosses cotes

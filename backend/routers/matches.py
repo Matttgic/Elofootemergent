@@ -1,10 +1,12 @@
 """Routes matchs et équipes : statut, compétitions, matchs du jour, détail d'un
 match, fiche et classement des équipes, recherche, configuration de notation."""
+import asyncio
 import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
+import cotes_historiques as ch
 from analytics import compact, comp_data, elo_data, match_summary, prediction, team_logos
 from betting import odds_view, value_pick
 from core import db
@@ -13,6 +15,7 @@ from football_client import get_token
 from ingest import COMPETITION_META, configured_codes, is_cup
 from jobs import catch_up_if_stale, ingest_state
 from player_scoring import analyze_player, player_scoring_config
+from routers.cotes import MAX_OVERROUND, MIN_OVERROUND, historique_charge
 from routers.players import PLAYER_LEAGUES, top_players
 from scoring import paris_date, scoring_config
 from signals import build_signals, h2h_insight, head_to_head
@@ -330,3 +333,28 @@ async def search(q: str = Query(..., min_length=2)):
 @router.get("/scoring/config")
 async def scoring_conf():
     return {"equipes": scoring_config(), "joueurs": player_scoring_config(), "elo": elo_config()}
+
+
+@router.get("/match/{match_id}/cotes-historiques")
+async def match_cotes_historiques(match_id: int):
+    """Fiche match : ce qui s'est passé aux mêmes cotes. Cotes football-data.co.uk
+    (avec les noms d'équipes de l'historique), sinon celles de la simulation de paris."""
+    m = await db.matches.find_one({"match_id": match_id}, {"_id": 0, "cotes_ref": 1})
+    if m is None:
+        raise HTTPException(404, "Match introuvable")
+    ref = m.get("cotes_ref") or {}
+    equipes = (None, None)
+    if ref.get("domicile") and ref.get("nul") and ref.get("exterieur"):
+        cotes = (ref["domicile"], ref["nul"], ref["exterieur"])
+        source = {"nom": ref.get("source"), "type": ref.get("type")}
+        equipes = (ref.get("equipe_domicile"), ref.get("equipe_exterieur"))
+    else:
+        bet = await db.bets.find_one({"_id": match_id}, {"home_odds": 1, "draw_odds": 1, "away_odds": 1,
+                                                        "bookmaker": 1}) or {}
+        cotes = (bet.get("home_odds"), bet.get("draw_odds"), bet.get("away_odds"))
+        source = {"nom": bet.get("bookmaker"), "type": "avant-match"}
+    if not all(cotes) or not MIN_OVERROUND <= sum(1 / c for c in cotes) <= MAX_OVERROUND:
+        return {"disponible": False}
+    h = await historique_charge()
+    res = await asyncio.to_thread(ch.recherche, h, cotes, ch.PRECISION, *equipes)
+    return {"disponible": True, "source": source, **res}

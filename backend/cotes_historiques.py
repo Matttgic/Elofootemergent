@@ -40,6 +40,7 @@ LIGUES = {
 PRECISION = 5.0           # tolérance par défaut (%) sur chaque cote sans marge
 MIN_MATCHS = 30           # en dessous, l'échantillon est signalé comme trop petit
 EXEMPLES = 10
+SCORES = 8                # scores exacts les plus fréquents affichés
 ISSUES = ("domicile", "nul", "exterieur")
 CAL_EDGES = [1.0, 1.15, 1.25, 1.35, 1.5, 1.7, 1.9, 2.1, 2.4, 2.8, 3.3, 4, 5, 7, 10, 15, 1000]
 CAL_MIN = 200
@@ -174,6 +175,20 @@ def _ci(k, n):
     return round(196 * math.sqrt(p * (1 - p) / n), 1)
 
 
+def _scores(scores, n):
+    """Scores exacts les plus fréquents : [{"score": "1-0", "matchs": 12, "pct": 9.5}]."""
+    c = {}
+    for sc in scores:
+        c[sc] = c.get(sc, 0) + 1
+    top = sorted(c.items(), key=lambda kv: (-kv[1], kv[0]))[:SCORES]
+    return [{"score": f"{a}-{b}", "matchs": k, "pct": round(100 * k / n, 1)} for (a, b), k in top]
+
+
+def _score(h, i, inverse=False):
+    a, b = h.buts[2 * i], h.buts[2 * i + 1]
+    return (b, a) if inverse else (a, b)
+
+
 def _exemple(h, i, equipe=None):
     d, e = h.equipes[h.dom[i]], h.equipes[h.ext[i]]
     out = {"date": _date(h.date[i]), "ligue": LIGUES.get(h.ligues[h.ligue[i]], h.ligues[h.ligue[i]]),
@@ -237,6 +252,7 @@ def similaires(h, cotes, precision=PRECISION, found=None):
     return {"precision_pct": precision, "matchs": n, "identiques": exact,
             "cotes_pinnacle": [round(x / n, 2) for x in somme_cotes] if n else None,
             "suffisant": n >= MIN_MATCHS, "issues": issues,
+            "scores": _scores((_score(h, i) for i in found), n),
             "exemples": [_exemple(h, i) for i in recent]}
 
 
@@ -310,20 +326,23 @@ def tendance(h, found, equipes):
     ceux aux cotes voisines, plus ceux de chaque équipe à sa cote de victoire (sa victoire
     compte pour l'issue de son côté, sa défaite pour l'autre). `equipes` : liste de
     (index de l'équipe, 0 si elle reçoit / 2 si elle se déplace, ses matchs trouvés)."""
-    issue_de = {i: h.issue(i) for i in found}
+    issue_de = {i: (h.issue(i), _score(h, i)) for i in found}
     for equipe, cote_k, matchs in equipes:
         for i in matchs:
             r = _resultat_equipe(h, equipe, i)
-            issue_de.setdefault(i, cote_k if r == 0 else (1 if r == 1 else 2 - cote_k))
+            # score retourné si l'équipe jouait de l'autre côté qu'ici
+            inverse = (h.dom[i] == equipe) != (cote_k == 0)
+            issue_de.setdefault(i, (cote_k if r == 0 else (1 if r == 1 else 2 - cote_k), _score(h, i, inverse)))
     n = len(issue_de)
     count = [0, 0, 0]
-    for y in issue_de.values():
+    for y, _ in issue_de.values():
         count[y] += 1
     out = {"matchs": n}
     for k, name in enumerate(ISSUES):
         out[name] = count[k]
         out[f"{name}_pct"] = round(100 * count[k] / n, 1) if n else None
     out["issue"] = ISSUES[max(range(3), key=count.__getitem__)] if n else None
+    out["scores"] = _scores((sc for _, sc in issue_de.values()), n) if n else []
     return out
 
 

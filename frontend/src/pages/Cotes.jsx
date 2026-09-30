@@ -2,15 +2,13 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { Skeleton } from "../components/ui/skeleton";
-import { Coins, History, Search, ShieldAlert, TrendingUp, Users } from "lucide-react";
+import { Coins, History, Search, ShieldAlert, Users } from "lucide-react";
+import { OutcomeCounts, ScoreChips, Tendance, fmt, fmtInt, signed } from "../components/OddsHistory";
 
 const PRECISIONS = [3, 5, 10, 15];
 const EXEMPLE = { domicile: "1.30", nul: "5.75", exterieur: "10.5", dom: "Paris SG", ext: "Marseille" };
 const ISSUES = [["domicile", "1 · Domicile"], ["nul", "N · Nul"], ["exterieur", "2 · Extérieur"]];
 
-const fmt = (v, d = 1) => (v == null ? "—" : Number(v).toFixed(d).replace(".", ","));
-const fmtInt = (v) => (v == null ? "—" : Number(v).toLocaleString("fr-FR"));
-const signed = (v) => (v == null ? "—" : `${v > 0 ? "+" : ""}${fmt(v)} %`);
 const gainColor = (v) => (v == null ? "text-slate-400" : v > 0 ? "text-emerald-400" : "text-red-400");
 const parseOdd = (s) => {
   const v = parseFloat(String(s || "").replace(",", "."));
@@ -124,86 +122,6 @@ function TeamResult({ e, cote, testid }) {
           <Examples rows={e.exemples} testid={`${testid}-exemples`} />
         </>
       )}
-    </div>
-  );
-}
-
-// Résumé : chaque source vue depuis le match demandé (1 / N / 2), puis tous ces matchs
-// mis ensemble (chacun compté une fois) et la tendance qui en ressort.
-function Tendance({ d, test }) {
-  const t = d.tendance;
-  if (!t) return null;
-  const known = (e) => (e?.trouvee && e.matchs > 0 ? e : null);
-  const home = known(d.equipe_domicile), away = known(d.equipe_exterieur);
-  const nomDom = d.equipe_domicile?.trouvee ? d.equipe_domicile.nom : "Domicile";
-  const nomExt = d.equipe_exterieur?.trouvee ? d.equipe_exterieur.nom : "Extérieur";
-  const sim = d.similaires;
-  const rows = [];
-  if (sim.matchs) {
-    rows.push({ key: "similaires", label: "Tous les matchs à ces cotes", n: sim.matchs,
-      v: [sim.issues.domicile.matchs, sim.issues.nul.matchs, sim.issues.exterieur.matchs] });
-  }
-  if (home) {
-    rows.push({ key: "domicile", label: `${home.nom} à une cote proche de ${fmt(d.cotes.domicile, 2)}`, n: home.matchs,
-      v: [home.victoires, home.nuls, home.defaites], sub: ["victoires", "nuls", "défaites"] });
-  }
-  if (away) {
-    rows.push({ key: "exterieur", label: `${away.nom} à une cote proche de ${fmt(d.cotes.exterieur, 2)}`, n: away.matchs,
-      v: [away.defaites, away.nuls, away.victoires], sub: ["défaites", "nuls", "victoires"] });
-  }
-  const top = (v) => v.indexOf(Math.max(...v));
-  const issueName = (k) => [`victoire de ${nomDom}`, "match nul", `victoire de ${nomExt}`][k]
-    .replace("victoire de Domicile", "victoire à domicile").replace("victoire de Extérieur", "victoire à l'extérieur");
-  const tops = rows.map((r) => top(r.v));
-  const accord = tops.every((k) => k === tops[0]);
-  const tv = [t.domicile, t.nul, t.exterieur];
-  const tk = top(tv);
-  const cell = (x, n, sub) => (
-    <div className="text-right">
-      <div className="font-stat text-slate-100">{fmtInt(x)} <span className="text-slate-500 text-[11px]">{fmt(100 * x / n, 0)} %</span></div>
-      {sub && <div className="text-[10px] text-slate-600">{sub}</div>}
-    </div>
-  );
-  return (
-    <div className="card-surface rounded-xl p-5 border border-emerald-500/20" data-testid="cotes-tendance">
-      <h2 className="font-head text-lg font-bold text-slate-50 flex items-center gap-2 mb-3">
-        <TrendingUp className="w-5 h-5 text-emerald-400" /> Résumé et tendance
-      </h2>
-      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-2 items-center text-sm">
-        <div />
-        {[`1 · ${nomDom}`, "N · Nul", `2 · ${nomExt}`].map((h) => (
-          <div key={h} className="text-[10px] uppercase tracking-wide text-slate-500 text-right max-w-[5.5rem] truncate">{h}</div>
-        ))}
-        {rows.map((r) => (
-          <div key={r.key} className="contents" data-testid={`tendance-${r.key}`}>
-            <div className="text-xs text-slate-300 leading-tight">{r.label} <span className="text-slate-500">({fmtInt(r.n)} matchs)</span></div>
-            {r.v.map((x, j) => <div key={j}>{cell(x, r.n, r.sub?.[j])}</div>)}
-          </div>
-        ))}
-        <div className="contents" data-testid="tendance-ensemble">
-          <div className="text-xs font-semibold text-emerald-300 leading-tight border-t border-slate-700 pt-2">
-            Tout mis ensemble <span className="text-slate-500 font-normal">({fmtInt(t.matchs)} matchs)</span>
-          </div>
-          {tv.map((x, j) => (
-            <div key={j} className={`border-t border-slate-700 pt-2 ${j === tk ? "text-emerald-300" : ""}`}>{cell(x, t.matchs)}</div>
-          ))}
-        </div>
-      </div>
-      <p className="mt-4 text-sm text-slate-200" data-testid="tendance-phrase">
-        Tendance générale : <b className="text-emerald-300">{issueName(tk)}</b> ({fmt(100 * tv[tk] / t.matchs, 0)} % des matchs).{" "}
-        <span className="text-slate-400">
-          {rows.length > 1 && (accord
-            ? `Les ${rows.length} sources vont dans le même sens.`
-            : `Les sources ne sont pas d'accord : ${rows.map((r, i) => `${r.label.split(" à une cote")[0].replace("Tous les matchs à ces cotes", "les cotes")} → ${issueName(tops[i])}`).join(" ; ")}.`)}
-        </span>
-      </p>
-      <p className="mt-2 text-[11px] text-slate-500">
-        Chaque match n'est compté qu'une fois ; pour une équipe, sa victoire compte pour son côté et sa défaite pour
-        l'autre. Les matchs aux cotes voisines, bien plus nombreux, pèsent le plus.
-        {test && <> Testée à l'aveugle sur {fmtInt(test.matchs)} matchs, cette tendance désigne la bonne issue aussi souvent
-          que la cote seule ({fmt(test.reussite_pct)} % contre {fmt(test.reussite_cote_pct)} %), et parier quand elle trouve
-          la cote trop haute rend <b className="text-red-400">{signed(test.roi_pct)}</b>.</>}
-      </p>
     </div>
   );
 }
@@ -404,16 +322,8 @@ export default function Cotes() {
             </p>
             {s.matchs > 0 ? (
               <>
-                <div className="grid grid-cols-3 gap-2 text-center" data-testid="cotes-resume">
-                  {[["domicile", "Victoire à domicile", "text-emerald-300"], ["nul", "Match nul", "text-slate-200"],
-                    ["exterieur", "Victoire à l'extérieur", "text-cyan-300"]].map(([k, l, c]) => (
-                    <div key={k} className="rounded-lg bg-slate-900/60 py-3 px-1" data-testid={`resume-${k}`}>
-                      <div className={`font-stat font-black text-3xl sm:text-4xl leading-none ${c}`}>{fmtInt(s.issues[k].matchs)}</div>
-                      <div className="text-[11px] text-slate-300 mt-1.5">{l}</div>
-                      <div className="font-stat text-sm text-slate-400 mt-0.5">{fmt(s.issues[k].reel_pct, 0)} %</div>
-                    </div>
-                  ))}
-                </div>
+                <OutcomeCounts s={s} />
+                <ScoreChips scores={s.scores} testid="similaires-scores" />
                 {d.marge_pct > 5 && s.cotes_pinnacle && (
                   <p className="text-[11px] text-slate-400 mt-3" data-testid="cotes-equivalent">
                     Tes cotes {[d.cotes.domicile, d.cotes.nul, d.cotes.exterieur].map((c) => fmt(c, 2)).join(" / ")} contiennent{" "}

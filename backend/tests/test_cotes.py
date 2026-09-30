@@ -3,6 +3,7 @@ des équipes à cote de victoire voisine (petit historique construit à la main)
 le fichier réel de l'historique Pinnacle et les routes de l'API (sans base)."""
 import gzip
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,8 @@ def test_similar_odds_counts_outcomes_and_returns(small):
     assert ext["roi_historique_pct"] == pytest.approx(100 * (11.0 - 1 - 2) / 3, abs=0.1)
     assert s["suffisant"] is False
     assert s["cotes_pinnacle"] == [1.30, 5.77, 10.5]      # moyenne des cotes des 3 matchs trouvés
+    assert s["scores"] == [{"score": "0-1", "matchs": 1, "pct": 33.3}, {"score": "1-1", "matchs": 1, "pct": 33.3},
+                           {"score": "3-0", "matchs": 1, "pct": 33.3}]
     assert [e["date"] for e in s["exemples"]] == ["2021-01-01", "2020-02-01", "2020-01-01"]
     assert s["exemples"][0] == {"date": "2021-01-01", "ligue": "Serie A", "domicile": "Inter", "exterieur": "Lazio",
                                 "score": "0-1", "cotes": [1.29, 5.9, 11.0]}
@@ -87,6 +90,8 @@ def test_full_search_and_team_list(small):
     t = r["tendance"]
     assert (t["matchs"], t["domicile"], t["nul"], t["exterieur"]) == (4, 2, 1, 1) and t["issue"] == "domicile"
     assert t["domicile_pct"] == 50.0
+    # Lyon-PSG 0-2 : PSG reçoit ici, le score est vu de son côté (2-0)
+    assert {x["score"]: x["matchs"] for x in t["scores"]} == {"0-1": 1, "1-1": 1, "2-0": 1, "3-0": 1}
     # sans équipe connue : pas de tendance ; Lens reçoit à 2,40, Marseille se déplace à 3,10
     assert ch.recherche(small, (1.30, 5.75, 10.5))["tendance"] is None
     t = ch.recherche(small, (2.40, 3.30, 3.10), 5, "Nantes", "Marseille")["tendance"]
@@ -151,3 +156,25 @@ def test_api_teams_and_calibration(api):
     c = api.get("/api/cotes/calibration").json()
     assert set(c["calibration"]) == set(ch.ISSUES) and c["test"] == ch.TEST_HISTORIQUE
     assert all(r["matchs"] >= ch.CAL_MIN for rows in c["calibration"].values() for r in rows)
+
+
+def test_parse_couk_files():
+    """Fichiers football-data.co.uk : séparateur virgule ou tabulation, cotes à la clôture
+    pour un match joué, avant-match sinon, cotes irréalistes écartées."""
+    import cotes_ingest as ci
+    tsv = ("Country\tLeague\tDate\tTime\tHome\tAway\tAvgH\tAvgD\tAvgA\n"
+           "Brazil\tSerie A\t04/10/2026\t21:00\tFlamengo RJ\tPalmeiras\t2.1\t3.3\t3.6\n"
+           "Mexico\tLiga MX\t04/10/2026\t02:00\tAtlante\tMonterrey\t3.4\t3.6\t1.95\n")
+    assert ci.parse_fixtures(tsv, "Home", "Away", "HG", "AG", keep=lambda r: r.get("Country") == "Brazil") == [
+        {"home": "Flamengo RJ", "away": "Palmeiras", "utc": "2026-10-04T21:00:00Z", "score": None,
+         "odds": [2.1, 3.3, 3.6], "type": "avant-match"}]
+    text = ("Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,AvgH,AvgD,AvgA,AvgCH,AvgCD,AvgCA\n"
+            "F1,21/08/26,19:45,Marseille,Strasbourg,4,0,1.7,4.0,4.4,1.73,4.02,4.25\n"
+            "F1,22/08/26,,Lens,Lyon,1,1,2.5,3.3,2.9,,,\n"
+            "F1,23/08/26,15:00,Nice,Brest,2,0,1.2,3.0,4.0,1.2,3.0,4.0\n")
+    marseille, lens, nice = ci.parse_fixtures(text)
+    assert marseille["odds"] == [1.73, 4.02, 4.25] and marseille["type"] == "cloture" and marseille["score"] == (4, 0)
+    assert lens["odds"] == [2.5, 3.3, 2.9] and lens["type"] == "avant-match" and lens["utc"] == "2026-08-22T12:00:00Z"
+    assert nice["odds"] is None           # marge de 42 % : ignorées (le résultat sert encore aux noms)
+    assert ci._season_code(datetime(2026, 9, 30)) == ("2627", "2526")
+    assert ci._season_code(datetime(2027, 3, 1)) == ("2627", "2526")
