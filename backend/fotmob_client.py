@@ -200,6 +200,9 @@ async def fetch_finished_fixtures(client, league_id, season_name):
     data = r.json()
     if (data.get("details") or {}).get("selectedSeason") not in (season_name, None):
         return []
+    if "allMatches" not in (data.get("fixtures") or {}):
+        # réponse partielle (arrive de temps en temps) : erreur, pour réessayer plus tard
+        raise RuntimeError(f"FotMob : liste des matchs absente ({league_id}, {season_name})")
     out = []
     for m in (data.get("fixtures") or {}).get("allMatches") or []:
         st = m.get("status") or {}

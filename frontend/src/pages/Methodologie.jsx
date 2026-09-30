@@ -159,6 +159,37 @@ export default function Methodologie() {
                   </table>
                 </div>
               )}
+              {c.elo.backtest.xg_fotmob && (
+                <div className="mt-4" data-testid="methodo-backtest-fotmob">
+                  <p className="text-xs text-slate-500 mb-2">
+                    xG FotMob pour les autres championnats : {c.elo.backtest.xg_fotmob.matchs.toLocaleString("fr-FR")} matchs
+                    ({c.elo.backtest.xg_fotmob.periode}), log-loss.
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-[10px] uppercase text-slate-500 text-left border-b border-slate-800">
+                          <th className="py-1.5 pr-2">Championnats</th>
+                          <th className="py-1.5 px-2 text-right">Elo seul</th>
+                          <th className="py-1.5 px-2 text-right">Elo + xG</th>
+                          <th className="py-1.5 pl-2 text-right">Pinnacle</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {c.elo.backtest.xg_fotmob.lignes.map((r) => (
+                          <tr key={r.groupe} className="border-b border-slate-800/60 text-slate-300">
+                            <td className="py-1.5 pr-2">{r.groupe}</td>
+                            <td className="py-1.5 px-2 text-right font-stat">{r.elo.toFixed(4)}</td>
+                            <td className="py-1.5 px-2 text-right font-stat text-cyan-300 font-semibold">{r.site.toFixed(4)}</td>
+                            <td className="py-1.5 pl-2 text-right font-stat">{r.pinnacle.toFixed(4)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed mt-2">{c.elo.backtest.xg_fotmob.conclusion}</p>
+                </div>
+              )}
               {c.elo.backtest.notes && (
                 <div className="mt-4" data-testid="methodo-backtest-notes">
                   <p className="text-xs text-slate-500 mb-2">

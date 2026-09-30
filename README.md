@@ -179,13 +179,33 @@ Les bookmakers restent plus précis : parier le favori du modèle aux cotes Bet3
 rendu −4,6 %, les paris « value » (avantage ≥ 5 %) −10 %. Pour reproduire :
 `cd backend && python -m tools.backtest_historique` (réseau requis).
 
-**Forme xG** (5 grands championnats) : le modèle ajoute l'écart entre expected goals
-créés et concédés de chaque équipe (xG Understat, moyenne à demi-vie de 15 matchs), dès
-que les deux équipes ont au moins 3 matchs avec xG ; ailleurs, l'Elo seul s'applique.
+**Forme xG** : le modèle ajoute l'écart entre expected goals créés et concédés de chaque
+équipe (moyenne à demi-vie de 15 matchs, propre à chaque championnat : une équipe promue
+ou reléguée repart sans forme xG), dès que les deux équipes ont au moins 3 matchs avec xG ;
+sinon, l'Elo seul s'applique. Sources : Understat pour les 5 grands championnats, FotMob
+(Opta) pour le Portugal, les Pays-Bas, le Championship et le Brésil.
 Sur 7 800 matchs de ces championnats : log-loss 0,992 → **0,983** (Brier 0,592 → 0,586),
 soit 38 % de l'écart avec Pinnacle (0,968) comblé. Reproduire :
 `python -m tools.backtest_historique --xg`. Les xG sont rattachés aux matchs à chaque
 synchro complète (5 appels Understat ; les 2 saisons précédentes une seule fois).
+
+**xG FotMob** (Championship, Portugal, Pays-Bas ; saisons 2024-25 à 2026-27, 4 241 matchs,
+log-loss) :
+
+| Championnats | Elo seul | Elo + xG (site) | Pinnacle |
+| --- | --- | --- | --- |
+| Les 8 championnats | 0,9879 | **0,9794** | 0,9674 |
+| 5 grands (Understat) | 0,9847 | **0,9735** | 0,9611 |
+| Championship (FotMob) | 1,0447 | **1,0426** | 1,0318 |
+| Primeira Liga (FotMob) | 0,9323 | **0,9279** | 0,9154 |
+| Eredivisie (FotMob) | 0,9587 | **0,9506** | 0,9390 |
+
+Sans la forme xG par championnat, les xG du Championship dégradaient les prévisions des
+promus en Premier League (8 championnats : 0,9832 au lieu de 0,9794). Reproduire :
+`python -m tools.backtest_historique --fotmob` (environ 4 700 fiches de match FotMob la
+première fois, puis cache). En production, FotMob est lu à chaque synchro complète : la
+liste des matchs de la saison, puis une fiche par match encore sans xG (1 500 au plus par
+synchro, le rattrapage des 2 saisons précédentes s'étale sur quelques synchros).
 
 **Stats par écart de notes /100** : la page Stats montre aussi le résultat des matchs
 selon l'écart des notes globales que les deux équipes avaient avant le coup d'envoi

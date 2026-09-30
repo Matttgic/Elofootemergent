@@ -23,6 +23,11 @@ ces championnats, l'Elo seul et le modèle Elo + forme xG du site (référence :
 le match), seule ou ajoutée à l'Elo, sur les matchs où les deux notes existent
 (référence : 11 740 matchs, note 1,022 ; Elo 0,9915 ; Elo + note 0,9912 ; Pinnacle 0,970).
 
+--fotmob : ajoute les xG FotMob (Opta) du Championship, du Portugal et des Pays-Bas
+(saisons 2023-24 à 2026-27, un appel par match la première fois, puis cache local) et
+compare l'Elo seul et le modèle Elo + forme xG du site sur les 8 championnats (référence :
+4 241 matchs de 2024-25 à 2026-27, log-loss 0,9879 → 0,9794 ; Pinnacle 0,9674).
+
 --classement : toutes les méthodes sur les mêmes matchs (5 grands championnats où xG,
 notes et cotes existent), avec l'indice de précision de la page Méthode (0 = simples
 fréquences, 100 = Pinnacle ; référence : 7 144 matchs, pronostic du site 86, Elo 77,
@@ -150,6 +155,7 @@ def main():
     ap.add_argument("--xg", action="store_true", help="comparer aussi le modèle Elo + forme xG")
     ap.add_argument("--notes", action="store_true", help="évaluer la note /100 seule et le modèle Elo + note")
     ap.add_argument("--classement", action="store_true", help="classer toutes les méthodes sur les mêmes matchs")
+    ap.add_argument("--fotmob", action="store_true", help="ajouter les xG FotMob (Championship, Portugal, Pays-Bas)")
     args = ap.parse_args()
 
     rows = load()
@@ -162,6 +168,9 @@ def main():
         return
     if args.classement:
         backtest_ranking(rows, pre, args.home_adv)
+        return
+    if args.fotmob:
+        backtest_fotmob(rows, pre, args.home_adv)
         return
     preds = {"Fréquences dom/nul/ext": [], "Elo (site)": [], "Bet365 avant-match": [],
              "Moyenne clôture": [], "Pinnacle clôture": []}
@@ -272,6 +281,82 @@ def backtest_notes(rows, pre, home_adv):
     print(f"Note /100 — 8 championnats, saisons {TEST[0]} à {TEST[-1]}, matchs où les deux notes existent")
     for name, pairs in preds.items():
         print(f"  {name:24} {scores(pairs)}")
+
+
+FM_LEAGUES = {"E1": 48, "P1": 61, "N1": 57}      # Championship, Primeira Liga, Eredivisie
+FM_SEASONS = ["2324", "2425", "2526", "2627"]
+FM_TEST = ["2425", "2526", "2627"]
+
+
+def _fotmob(league, season):
+    """Matchs FotMob d'un championnat et d'une saison, avec leurs xG (cache local)."""
+    path = CACHE / f"fotmob_{league}_{season}.json"
+    if not path.exists():
+        import asyncio
+        from fotmob_client import fetch_finished_fixtures, fetch_matches_xg, fotmob_client
+
+        async def download():
+            async with fotmob_client() as client:
+                for attempt in range(5):
+                    try:
+                        fixtures = await fetch_finished_fixtures(client, FM_LEAGUES[league],
+                                                                 f"20{season[:2]}/20{season[2:]}")
+                        break
+                    except RuntimeError:          # réponse partielle : on réessaie
+                        await asyncio.sleep(10 * (attempt + 1))
+                else:
+                    raise RuntimeError(f"FotMob indisponible pour {league} {season}")
+                xgs = {}
+                for _ in range(3):                # matchs en erreur réseau : nouvel essai
+                    todo = [f["id"] for f in fixtures if f["id"] not in xgs]
+                    if todo:
+                        xgs.update(await fetch_matches_xg(client, todo))
+                return [{**f, "xg": xgs.get(f["id"])} for f in fixtures]
+        CACHE.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(asyncio.run(download())))
+    return json.loads(path.read_text())
+
+
+def backtest_fotmob(rows, pre, home_adv):
+    """Elo seul contre Elo + forme xG (par championnat) sur les 8 championnats, avec les
+    xG Understat (5 grands) et FotMob (Championship, Portugal, Pays-Bas)."""
+    from xg_ingest import pair_fixtures
+    attach_xg(rows)
+    by_season = {}
+    for m in rows:
+        m["home_team"]["name"], m["away_team"]["name"] = m["home_team"]["id"], m["away_team"]["id"]
+        by_season.setdefault((m["competition_code"], m["season"]), []).append(m)
+    by_id = {m["match_id"]: m for m in rows}
+    for league in FM_LEAGUES:
+        for season in FM_SEASONS:
+            pairs, missed = pair_fixtures(_fotmob(league, season), by_season.get((league, season), []))
+            n = 0
+            for fx, mid in pairs:
+                if fx["xg"]:
+                    by_id[mid]["xg"] = {"home": fx["xg"][0], "away": fx["xg"][1]}
+                    n += 1
+            print(f"xG FotMob {league} {season} : {n} matchs rattachés, {missed} non rapprochés")
+    xgf = elo.xg_form(rows)
+    groups = {}
+    for season in FM_TEST:
+        train = [m for m in rows if SEASONS[0] < m["season"] < season]
+        c1 = elo.fit_outcome_model(train, pre, home_adv=home_adv)
+        c2 = elo.fit_outcome_model_xg(train, pre, xgf, home_adv=home_adv)
+        for m in rows:
+            if m["season"] != season or not m["ps_close"] or pre[m["match_id"]][2] < elo.BURN_IN:
+                continue
+            rh, ra, _ = pre[m["match_id"]]
+            d = elo.xg_diff(*xgf["pre"][m["match_id"]])
+            p1 = list(elo.outcome_probs(rh - ra, c1, home_adv=home_adv))
+            p2 = list(elo.outcome_probs(rh - ra, c2, home_adv=home_adv, xg_diff=d)) if d is not None else p1
+            for grp in ("8 championnats", "5 grands" if m["competition_code"] in US_LEAGUES else m["competition_code"]):
+                for name, p in (("Elo seul", p1), ("Elo + forme xG (site)", p2), ("Pinnacle clôture", book(m["ps_close"]))):
+                    groups.setdefault(grp, {}).setdefault(name, []).append((p, outcome(m)))
+    print(f"Saisons {FM_TEST[0]} à {FM_TEST[-1]}")
+    for grp in ("8 championnats", "5 grands", *FM_LEAGUES):
+        print(grp)
+        for name, pairs in groups.get(grp, {}).items():
+            print(f"  {name:24} {scores(pairs)}")
 
 
 def backtest_ranking(rows, pre, home_adv):
