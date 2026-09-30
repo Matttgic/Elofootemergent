@@ -517,6 +517,7 @@ def test_light_and_full_ingest_write_matches_in_bulk(api, monkeypatch):
 
     import cotes_ingest
     monkeypatch.setattr(cotes_ingest, "ingest_cotes", no_cotes)
+    monkeypatch.setattr(cotes_ingest, "ingest_cotes_a_venir", no_cotes)
 
     async def scenario():
         db = server.db
@@ -534,6 +535,7 @@ def test_light_and_full_ingest_write_matches_in_bulk(api, monkeypatch):
 
     light, full, ids, hist = asyncio.run(scenario())
     assert light["ok"] and light["matchs_maj"] == 2          # BL1 hors des compétitions suivies
+    assert light["cotes"] == {"rattaches": 0}                # cotes des matchs à venir (synchro horaire)
     assert full["ok"] and full["matchs"] == 2 and full["historique"] == 2 and full["cotes"] == {"rattaches": 0}
     assert ids == {70001, 70002, 70004} and hist == 2
 
@@ -575,16 +577,31 @@ def test_cotes_ingest_attaches_couk_odds(api, monkeypatch):
         clo = await db.matches.count_documents({"cotes_ref.type": "cloture", "cotes_ref.domicile": 2.0})
         ava = await db.matches.count_documents({"cotes_ref.type": "avant-match", "cotes_ref.domicile": 1.9})
         one = await db.matches.find_one({"match_id": 86}, {"cotes_ref": 1, "home_team": 1})
+        again = await cotes_ingest.ingest_cotes(db, NOW, client=object())           # rien n'a changé
+        noms = dict((await db.meta.find_one({"_id": "cotes_noms"}))["PL"])
+        # synchro horaire : nouvelles cotes d'avant-match publiées, noms mémorisés, rien d'autre relu
+        files["fixtures.csv"] = files["fixtures.csv"].replace(",1.9,3.6,4.1", ",1.95,3.5,4.0")
+        files.pop(f"mmz4281/{cur}/E0.csv")
+        hourly = await cotes_ingest.ingest_cotes_a_venir(db, NOW, client=object())
+        ava2 = await db.matches.count_documents({"cotes_ref.type": "avant-match", "cotes_ref.domicile": 1.95})
+        clo2 = await db.matches.count_documents({"cotes_ref.type": "cloture", "cotes_ref.domicile": 2.0})
+        hourly_again = await cotes_ingest.ingest_cotes_a_venir(db, NOW, client=object())
         # remise en état : seules les cotes du jeu de test (match 86) restent
         original = next(m for m in dataset()[0] if m["match_id"] == 86)["cotes_ref"]
         await db.matches.update_many({}, {"$unset": {"cotes_ref": ""}})
         await db.matches.update_one({"match_id": 86}, {"$set": {"cotes_ref": original}})
+        await db.meta.delete_one({"_id": "cotes_noms"})
         played = sum(m["status"] == "FINISHED" for m in docs)
-        return stats, clo, ava, one, played, len(docs) - played
+        return (stats, clo, ava, one, played, len(docs) - played, again, noms, hourly, ava2, clo2, hourly_again)
 
     monkeypatch.setenv("COMPETITIONS", "PL")
-    stats, clo, ava, one, played, to_come = asyncio.run(scenario())
+    (stats, clo, ava, one, played, to_come, again, noms, hourly, ava2, clo2,
+     hourly_again) = asyncio.run(scenario())
     assert clo == played >= 80 and ava == to_come >= 10 and stats["rattaches"] == played + to_come
+    assert again["rattaches"] == 0                       # cotes inchangées : rien de réécrit
+    assert all(noms[n] == i + 1 for i, n in enumerate(COUK))   # correspondance mémorisée pour la synchro horaire
+    assert hourly["rattaches"] == ava2 == to_come and clo2 == played and hourly["a_venir_non_rattaches"] == 1
+    assert hourly_again["rattaches"] == 0
     assert stats["a_venir_non_rattaches"] == 1 and stats["championnats"] == 1
     assert one["cotes_ref"]["equipe_domicile"] == COUK[one["home_team"]["id"] - 1]
     assert one["cotes_ref"]["source"].startswith("football-data.co.uk")

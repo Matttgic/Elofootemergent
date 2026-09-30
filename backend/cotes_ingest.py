@@ -9,6 +9,10 @@ Les noms d'équipes football-data.co.uk sont gardés avec les cotes : ce sont ce
 l'historique des cotes (cotes_historiques). Le rapprochement avec les matchs
 football-data est celui des xG (xg_ingest.pair_fixtures) : correspondance des noms
 apprise sur les résultats (saison en cours et précédente), puis équipes et date ± 1 jour.
+
+La synchro complète (ingest_cotes) mémorise cette correspondance (meta « cotes_noms ») ;
+la synchro horaire (ingest_cotes_a_venir) ne relit que les fichiers des matchs à venir
+et s'en sert, pour que les cotes d'avant-match arrivent dès leur publication.
 """
 import csv
 import io
@@ -19,7 +23,7 @@ import httpx
 from pymongo import UpdateOne
 
 from ingest import configured_codes
-from xg_ingest import pair_fixtures
+from xg_ingest import pair_fixtures, team_map
 
 logger = logging.getLogger(__name__)
 
@@ -95,10 +99,14 @@ def _season_code(now):
     return f"{y % 100:02d}{(y + 1) % 100:02d}", f"{(y - 1) % 100:02d}{y % 100:02d}"
 
 
-def odds_ops(fixtures, fd_matches, current_ids, now):
+def odds_ops(fixtures, fd_matches, current_ids, now, tmap=None, existing=None):
     """Écritures `cotes_ref` des matchs de la saison en cours rapprochés (les matchs
-    passés servent seulement à apprendre les noms). Retourne (ops, non rapprochés)."""
-    pairs, _ = pair_fixtures(fixtures, fd_matches)
+    passés servent seulement à apprendre les noms). `existing` : cotes déjà en base
+    (match_id -> cotes_ref) ; rien n'est réécrit si elles n'ont pas changé, et des cotes
+    à la clôture ne sont jamais remplacées par des cotes d'avant-match.
+    Retourne (ops, non rapprochés)."""
+    pairs, _ = pair_fixtures(fixtures, fd_matches, tmap)
+    existing = existing or {}
     ops, paired = {}, set()
     for fx, mid in pairs:
         paired.add(id(fx))
@@ -106,6 +114,10 @@ def odds_ops(fixtures, fd_matches, current_ids, now):
             continue
         # clôture prioritaire sur avant-match si les deux fichiers ont le match
         if mid in ops and ops[mid][1] == "cloture":
+            continue
+        old = existing.get(mid) or {}
+        if (old.get("type") == "cloture" and fx["type"] != "cloture") or (
+                old.get("type") == fx["type"] and [old.get(k) for k in ("domicile", "nul", "exterieur")] == fx["odds"]):
             continue
         ops[mid] = (UpdateOne({"match_id": mid}, {"$set": {"cotes_ref": {
             "domicile": fx["odds"][0], "nul": fx["odds"][1], "exterieur": fx["odds"][2], "type": fx["type"],
@@ -115,7 +127,23 @@ def odds_ops(fixtures, fd_matches, current_ids, now):
     return [op for op, _ in ops.values()], missed
 
 
-PROJ = {"_id": 0, "match_id": 1, "utc_date": 1, "home_team": 1, "away_team": 1, "score.fullTime": 1}
+PROJ = {"_id": 0, "match_id": 1, "utc_date": 1, "home_team": 1, "away_team": 1, "score.fullTime": 1,
+        "cotes_ref": 1}
+
+
+def _upcoming_fixtures(code, upcoming, new_upcoming):
+    """Matchs à venir d'un championnat dans fixtures.csv / new_league_fixtures.csv."""
+    if code in DIVISIONS:
+        return parse_fixtures(upcoming, keep=lambda r, d=DIVISIONS[code]: r.get("Div") == d)
+    _, country, league = NEW_LEAGUES[code]
+    return parse_fixtures(new_upcoming, "Home", "Away", "HG", "AG",
+                          keep=lambda r: r.get("Country") == country and r.get("League") == league)
+
+
+async def _upcoming_files(client, codes):
+    upcoming = await _fetch(client, "fixtures.csv") if any(c in DIVISIONS for c in codes) else ""
+    new_upcoming = await _fetch(client, "new_league_fixtures.csv") if any(c in NEW_LEAGUES for c in codes) else ""
+    return upcoming, new_upcoming
 
 
 async def ingest_cotes(db, now=None, client=None):
@@ -129,27 +157,28 @@ async def ingest_cotes(db, now=None, client=None):
         codes = [c for c in configured_codes() if c in DIVISIONS or c in NEW_LEAGUES]
         if not codes:
             return stats
-        upcoming = await _fetch(client, "fixtures.csv") if any(c in DIVISIONS for c in codes) else ""
-        new_upcoming = await _fetch(client, "new_league_fixtures.csv") if any(c in NEW_LEAGUES for c in codes) else ""
+        upcoming, new_upcoming = await _upcoming_files(client, codes)
         for code in codes:
             try:
                 if code in DIVISIONS:
                     div = DIVISIONS[code]
                     fixtures = parse_fixtures(await _fetch(client, f"mmz4281/{prev}/{div}.csv"))
                     fixtures += parse_fixtures(await _fetch(client, f"mmz4281/{cur}/{div}.csv"))
-                    fixtures += parse_fixtures(upcoming, keep=lambda r, d=div: r.get("Div") == d)
                 else:
-                    name, country, league = NEW_LEAGUES[code]
-                    keep = (lambda r, c=country, lg=league: r.get("Country") == c and r.get("League") == lg)
-                    fixtures = parse_fixtures(await _fetch(client, f"new/{name}.csv"), "Home", "Away", "HG", "AG")
+                    fixtures = parse_fixtures(await _fetch(client, f"new/{NEW_LEAGUES[code][0]}.csv"),
+                                              "Home", "Away", "HG", "AG")
                     fixtures = [f for f in fixtures if f["utc"][:4] >= str(now.year - 1)]
-                    fixtures += parse_fixtures(new_upcoming, "Home", "Away", "HG", "AG", keep=keep)
+                fixtures += _upcoming_fixtures(code, upcoming, new_upcoming)
             except Exception as e:  # noqa: BLE001
                 logger.error("Cotes football-data.co.uk %s échec : %s", code, e)
                 continue
             current = await db.matches.find({"competition_code": code}, PROJ).to_list(2000)
             history = await db.matches_history.find({"competition_code": code, "status": "FINISHED"}, PROJ).to_list(2000)
-            ops, missed = odds_ops(fixtures, current + history, {m["match_id"] for m in current}, now)
+            tmap = team_map(fixtures, current + history)
+            await db.meta.update_one({"_id": "cotes_noms"}, {"$set": {code: sorted([n, t] for n, t in tmap.items())}},
+                                     upsert=True)
+            ops, missed = odds_ops(fixtures, current + history, {m["match_id"] for m in current}, now, tmap,
+                                   {m["match_id"]: m.get("cotes_ref") for m in current})
             if ops:
                 await db.matches.bulk_write(ops, ordered=False)
             stats["rattaches"] += len(ops)
@@ -159,4 +188,37 @@ async def ingest_cotes(db, now=None, client=None):
     finally:
         if own:
             await client.aclose()
+    return stats
+
+
+async def ingest_cotes_a_venir(db, now=None, client=None):
+    """Synchro horaire : cotes d'avant-match des matchs à venir, dès que football-data.co.uk
+    les publie (fixtures.csv, et new_league_fixtures.csv pour le Brésil), avec les noms
+    d'équipes appris par la dernière synchro complète. Rien sans cette correspondance."""
+    now = now or datetime.now(timezone.utc)
+    stats = {"rattaches": 0, "a_venir_non_rattaches": 0, "championnats": 0}
+    noms = (await db.meta.find_one({"_id": "cotes_noms"})) or {}
+    codes = [c for c in configured_codes() if (c in DIVISIONS or c in NEW_LEAGUES) and noms.get(c)]
+    if not codes:
+        return stats
+    own = client is None
+    client = client or httpx.AsyncClient(timeout=60, follow_redirects=True)
+    try:
+        upcoming, new_upcoming = await _upcoming_files(client, codes)
+    finally:
+        if own:
+            await client.aclose()
+    for code in codes:
+        fixtures = _upcoming_fixtures(code, upcoming, new_upcoming)
+        if not fixtures:
+            continue
+        current = await db.matches.find({"competition_code": code, "status": {"$ne": "FINISHED"}}, PROJ).to_list(2000)
+        ops, missed = odds_ops(fixtures, current, {m["match_id"] for m in current}, now,
+                               {n: t for n, t in noms[code]}, {m["match_id"]: m.get("cotes_ref") for m in current})
+        if ops:
+            await db.matches.bulk_write(ops, ordered=False)
+        stats["rattaches"] += len(ops)
+        stats["a_venir_non_rattaches"] += missed
+        stats["championnats"] += 1
+    logger.info("Cotes à venir football-data.co.uk : %s", stats)
     return stats
