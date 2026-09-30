@@ -56,6 +56,9 @@ TEST_HISTORIQUE = {
     "paris_equipes": {"paris": 41_604, "roi_pct": -2.4},
     "zones": {"paris": 43_056, "roi_pct": -1.8},
     "combinaison": {"matchs": 136_988, "logloss": 1.0013, "logloss_pinnacle": 1.0013, "poids": 0},
+    # tendance générale de la page (cotes voisines + équipes mis ensemble)
+    "tendance": {"matchs": 148_353, "logloss": 1.0030, "logloss_pinnacle": 1.0019,
+                 "reussite_pct": 50.3, "reussite_cote_pct": 50.3, "paris": 90_289, "roi_pct": -3.8},
 }
 
 
@@ -181,8 +184,8 @@ def _exemple(h, i, equipe=None):
     return out
 
 
-def similaires(h, cotes, precision=PRECISION):
-    """Matchs dont les trois cotes sans marge sont à ± precision % de celles demandées."""
+def voisins(h, cotes, precision=PRECISION):
+    """Index des matchs dont les trois cotes sans marge sont à ± precision % des cotes."""
     q, _ = fair_probs(cotes)
     t = precision / 100
     lo = [x / (1 + t) for x in q]
@@ -196,6 +199,13 @@ def similaires(h, cotes, precision=PRECISION):
             for i in range(*bloc):
                 if all(lo[k] <= h.proba(i, k) <= hi[k] for k in range(3)):
                     found.append(i)
+    return found
+
+
+def similaires(h, cotes, precision=PRECISION, found=None):
+    """Matchs dont les trois cotes sans marge sont à ± precision % de celles demandées."""
+    if found is None:
+        found = voisins(h, cotes, precision)
     n = len(found)
     count = [0, 0, 0]
     gain = [0.0, 0.0, 0.0]
@@ -240,9 +250,16 @@ def trouver_equipe(h, nom):
     return next((i for n, i in h.index_equipe.items() if n.lower() == low), None)
 
 
-def equipe_a_cote(h, equipe, cote, precision=PRECISION, cote_adverse=None, cote_nul=None):
-    """Matchs de l'équipe où sa cote de victoire (sans marge) était à ± precision % de
-    celle demandée, quel que soit le terrain : victoires, nuls, défaites."""
+def _resultat_equipe(h, equipe, i):
+    """0 victoire, 1 nul, 2 défaite de l'équipe dans le match i."""
+    k = 0 if h.dom[i] == equipe else 2
+    y = h.issue(i)
+    return 0 if y == k else (1 if y == 1 else 2)
+
+
+def matchs_equipe(h, equipe, cote, precision=PRECISION, cote_adverse=None, cote_nul=None):
+    """Index des matchs de l'équipe où sa cote de victoire (sans marge) était à
+    ± precision % de celle demandée, quel que soit le terrain."""
     if cote_adverse and cote_nul:
         q, _ = fair_probs((cote, cote_nul, cote_adverse))
         target = q[0]
@@ -250,19 +267,22 @@ def equipe_a_cote(h, equipe, cote, precision=PRECISION, cote_adverse=None, cote_
         target = 1 / cote
     t = precision / 100
     lo, hi = target / (1 + t), target / (1 - t)
-    found = []
-    for i in h.par_equipe.get(equipe, ()):
-        k = 0 if h.dom[i] == equipe else 2
-        if lo <= h.proba(i, k) <= hi:
-            found.append(i)
+    return [i for i in h.par_equipe.get(equipe, ())
+            if lo <= h.proba(i, 0 if h.dom[i] == equipe else 2) <= hi]
+
+
+def equipe_a_cote(h, equipe, cote, precision=PRECISION, cote_adverse=None, cote_nul=None, found=None):
+    """Matchs de l'équipe où sa cote de victoire (sans marge) était à ± precision % de
+    celle demandée, quel que soit le terrain : victoires, nuls, défaites."""
+    if found is None:
+        found = matchs_equipe(h, equipe, cote, precision, cote_adverse, cote_nul)
     n = len(found)
     res = [0, 0, 0]       # victoire, nul, défaite
     gain = annonce = 0.0
     cotes = []
     for i in found:
         k = 0 if h.dom[i] == equipe else 2
-        y = h.issue(i)
-        r = 0 if y == k else (1 if y == 1 else 2)
+        r = _resultat_equipe(h, equipe, i)
         res[r] += 1
         annonce += h.proba(i, k)
         gain += (h.cote(i, k) - 1) if r == 0 else -1
@@ -275,6 +295,7 @@ def equipe_a_cote(h, equipe, cote, precision=PRECISION, cote_adverse=None, cote_
         "ligues": sorted(LIGUES.get(h.ligues[li], h.ligues[li]) for li in h.equipe_ligues.get(equipe, ())),
         "cote_min": round(min(cotes), 2) if cotes else None, "cote_max": round(max(cotes), 2) if cotes else None,
         "domicile": sum(1 for i in found if h.dom[i] == equipe),
+        "victoires": res[0], "nuls": res[1], "defaites": res[2],
         "victoire_pct": pct(res[0]), "nul_pct": pct(res[1]), "defaite_pct": pct(res[2]),
         "marge_erreur_pct": _ci(res[0], n),
         "annonce_pct": pct(annonce), "seuil_pct": round(100 / cote, 1),
@@ -284,22 +305,53 @@ def equipe_a_cote(h, equipe, cote, precision=PRECISION, cote_adverse=None, cote_
     }
 
 
+def tendance(h, found, equipes):
+    """Tous les matchs mis ensemble, chacun compté une fois, vus depuis le match demandé :
+    ceux aux cotes voisines, plus ceux de chaque équipe à sa cote de victoire (sa victoire
+    compte pour l'issue de son côté, sa défaite pour l'autre). `equipes` : liste de
+    (index de l'équipe, 0 si elle reçoit / 2 si elle se déplace, ses matchs trouvés)."""
+    issue_de = {i: h.issue(i) for i in found}
+    for equipe, cote_k, matchs in equipes:
+        for i in matchs:
+            r = _resultat_equipe(h, equipe, i)
+            issue_de.setdefault(i, cote_k if r == 0 else (1 if r == 1 else 2 - cote_k))
+    n = len(issue_de)
+    count = [0, 0, 0]
+    for y in issue_de.values():
+        count[y] += 1
+    out = {"matchs": n}
+    for k, name in enumerate(ISSUES):
+        out[name] = count[k]
+        out[f"{name}_pct"] = round(100 * count[k] / n, 1) if n else None
+    out["issue"] = ISSUES[max(range(3), key=count.__getitem__)] if n else None
+    return out
+
+
 def recherche(h, cotes, precision=PRECISION, equipe_domicile=None, equipe_exterieur=None):
-    """Réponse complète : probabilités des cotes, matchs similaires, historique des équipes."""
+    """Réponse complète : probabilités des cotes, matchs similaires, historique des équipes
+    et, si une équipe est connue, la tendance de tous ces matchs mis ensemble."""
     q, marge = fair_probs(cotes)
+    found = voisins(h, cotes, precision)
     out = {
         "cotes": dict(zip(ISSUES, cotes)),
         "marge_pct": round(100 * marge, 1),
         "probas_cotes": {name: round(100 * q[k], 1) for k, name in enumerate(ISSUES)},
-        "similaires": similaires(h, cotes, precision),
-        "equipe_domicile": None, "equipe_exterieur": None,
+        "similaires": similaires(h, cotes, precision, found),
+        "equipe_domicile": None, "equipe_exterieur": None, "tendance": None,
     }
+    equipes = []
     for key, nom, k in (("equipe_domicile", equipe_domicile, 0), ("equipe_exterieur", equipe_exterieur, 2)):
         if not nom:
             continue
         idx = trouver_equipe(h, nom)
-        out[key] = ({"nom": nom, "trouvee": False} if idx is None else
-                    equipe_a_cote(h, idx, cotes[k], precision, cote_adverse=cotes[2 - k], cote_nul=cotes[1]))
+        if idx is None:
+            out[key] = {"nom": nom, "trouvee": False}
+            continue
+        matchs = matchs_equipe(h, idx, cotes[k], precision, cote_adverse=cotes[2 - k], cote_nul=cotes[1])
+        out[key] = equipe_a_cote(h, idx, cotes[k], precision, found=matchs)
+        equipes.append((idx, k, matchs))
+    if any(m for _, _, m in equipes):
+        out["tendance"] = tendance(h, found, equipes)
     return out
 
 

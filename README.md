@@ -241,7 +241,9 @@ cours, le modèle du site à la note seule. Reproduire :
 on entre les cotes 1N2 d'un match (et, si l'on veut, les deux équipes) ; le site retrouve les
 matchs passés dont les cotes Pinnacle à la clôture étaient proches (± 5 % par défaut sur
 chaque cote, marge du bookmaker retirée) et montre comment ils ont fini, puis les matchs de
-chaque équipe à une cote de victoire proche. Historique : football-data.co.uk, 160 868 matchs
+chaque équipe à une cote de victoire proche. Le résultat commence par le décompte (N matchs : X victoires
+à domicile, Y nuls, Z victoires à l'extérieur) et finit, avec les équipes, par un résumé 1 / N / 2 de
+chaque source et une tendance générale (tous ces matchs mis ensemble, chacun compté une fois). Historique : football-data.co.uk, 160 868 matchs
 de 38 championnats, mars 2012 à janvier 2026 (le site ne publie plus les cotes Pinnacle
 depuis), figé dans `backend/data/cotes_pinnacle.csv.gz` (2,3 Mo, ≈ 30 Mo en mémoire, chargé
 en 1 s à la première requête). Un même triplet de cotes se répète rarement (75 % des matchs
@@ -259,6 +261,7 @@ Test à l'aveugle (chaque saison jouée avec les seules saisons précédentes, 1
 | Parier une équipe d'après son historique à cote proche | 41 604 paris, −2,4 % |
 | Rejouer les tranches de cotes rentables par le passé | 43 056 paris, −1,8 % |
 | Combiner cote, cotes voisines et équipes (poids réglés sur le passé) | poids de l'historique : 0 chaque saison |
+| Tendance de la page (cotes voisines + équipes, tout mis ensemble) | bonne issue 50,3 % comme la cote seule ; paris −3,8 % |
 
 Les cotes Pinnacle sont presque parfaitement calibrées : l'historique ne dit rien de plus
 qu'elles. Seuls les très gros favoris (cote < 1,35) frôlent l'équilibre, les grosses cotes

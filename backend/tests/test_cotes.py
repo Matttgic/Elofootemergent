@@ -80,7 +80,17 @@ def test_full_search_and_team_list(small):
     r = ch.recherche(small, (1.30, 5.75, 10.5), 5, "Paris SG", "Nobody")
     assert r["probas_cotes"]["domicile"] == pytest.approx(74.1) and r["marge_pct"] == pytest.approx(3.8)
     assert r["equipe_domicile"]["matchs"] == 3
+    assert (r["equipe_domicile"]["victoires"], r["equipe_domicile"]["nuls"], r["equipe_domicile"]["defaites"]) == (2, 1, 0)
     assert r["equipe_exterieur"] == {"nom": "Nobody", "trouvee": False}
+    # tendance : 3 matchs aux cotes voisines (1-0, 1-1, 0-1) + Lyon-PSG (PSG gagne à l'extérieur,
+    # compté comme une victoire de l'équipe qui reçoit ici) ; PSG-Nantes et PSG-Lille comptés une fois
+    t = r["tendance"]
+    assert (t["matchs"], t["domicile"], t["nul"], t["exterieur"]) == (4, 2, 1, 1) and t["issue"] == "domicile"
+    assert t["domicile_pct"] == 50.0
+    # sans équipe connue : pas de tendance ; Lens reçoit à 2,40, Marseille se déplace à 3,10
+    assert ch.recherche(small, (1.30, 5.75, 10.5))["tendance"] is None
+    t = ch.recherche(small, (2.40, 3.30, 3.10), 5, "Nantes", "Marseille")["tendance"]
+    assert (t["matchs"], t["nul"]) == (1, 1)            # Lens-Marseille 1-1, trouvé deux fois, compté une fois
     noms = [e["nom"] for e in ch.liste_equipes(small)]
     assert noms == sorted(noms, key=str.lower) and "Marseille" in noms
     assert next(e for e in ch.liste_equipes(small) if e["nom"] == "Paris SG")["matchs"] == 4
@@ -122,6 +132,9 @@ def test_api_similar_odds(api):
     d = r.json()
     assert d["similaires"]["matchs"] > 100 and d["similaires"]["precision_pct"] == ch.PRECISION
     assert d["equipe_domicile"]["nom"] == "Paris SG" and d["equipe_exterieur"]["trouvee"] is True
+    t = d["tendance"]
+    assert t["issue"] == "domicile" and t["matchs"] >= d["similaires"]["matchs"]
+    assert t["domicile"] + t["nul"] + t["exterieur"] == t["matchs"]
     assert d["historique"]["championnats"] == 38
     # cotes irréalistes (marge de 42 %) ou hors bornes : refusées
     assert api.get("/api/cotes/similaires", params={"domicile": 1.2, "nul": 3, "exterieur": 4}).status_code == 422

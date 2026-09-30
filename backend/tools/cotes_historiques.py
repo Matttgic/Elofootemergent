@@ -15,7 +15,8 @@ saisons précédentes et compare aux cotes Pinnacle à la clôture :
   3. équipes : une équipe qui a battu ses cotes une saison le fait-elle encore la suivante ?
      Paris sur la victoire d'une équipe quand son historique à cote voisine est favorable ;
   4. zones de cotes rentables par le passé (ex. gros favoris), jouées la saison suivante ;
-  5. combinaison des sources (poids réglés sur les saisons passées).
+  5. combinaison des sources (poids réglés sur les saisons passées) ;
+  6. tendance générale de la page : tous ces matchs mis ensemble (cotes voisines + équipes).
 Les résultats de référence sont repris dans cotes_historiques.TEST_HISTORIQUE.
 """
 import argparse
@@ -194,7 +195,7 @@ def run_test(precision=ch.PRECISION):
     seasons = sorted({m["season"] for m in ms})
     first_test = seasons[2]
     grid = Grid()
-    team_hist = collections.defaultdict(list)       # équipe -> [(proba victoire annoncée, gagné)]
+    team_hist = collections.defaultdict(list)       # équipe -> [(proba victoire annoncée, 0 V / 1 N / 2 D)]
     feats = []
     for s in seasons:
         test = [m for m in ms if m["season"] == s]
@@ -203,16 +204,19 @@ def run_test(precision=ch.PRECISION):
                 c = grid.query(m["f"], t)
                 n = sum(c)
                 m["sim"] = [x / n for x in c] if n >= ch.MIN_MATCHS else None
+                m["sim_n"] = c
                 m["team"] = []
+                m["team_res"] = []
                 for side, k in (("home", 0), ("away", 2)):
-                    past = [(p, w) for p, w in team_hist[m[side]] if abs(1 / p * m["f"][k] - 1) <= t]
+                    past = [(p, r) for p, r in team_hist[m[side]] if abs(1 / p * m["f"][k] - 1) <= t]
                     nt = len(past)
-                    m["team"].append((nt, sum(w for _, w in past), sum(p for p, _ in past)))
+                    m["team"].append((nt, sum(r == 0 for _, r in past), sum(p for p, _ in past)))
+                    m["team_res"].append([sum(r == j for _, r in past) for j in range(3)])
                 feats.append(m)
         for m in test:
             grid.add(m)
-            team_hist[m["home"]].append((m["f"][0], m["y"] == 0))
-            team_hist[m["away"]].append((m["f"][2], m["y"] == 2))
+            team_hist[m["home"]].append((m["f"][0], m["y"]))
+            team_hist[m["away"]].append((m["f"][2], 2 - m["y"]))
 
     tested = [m for m in feats if m["sim"]]
     print(f"\n2. Cotes voisines (± {precision:g} %), saisons {_label(first_test)} à {_label(seasons[-1])}, "
@@ -314,6 +318,40 @@ def run_test(precision=ch.PRECISION):
     ll_ref = sum(_ll(m["f"], m["y"]) for m in tested if m["season"] > seasons[2]) / n_c
     print(f"  poids retenus sur les saisons passées : {', '.join(chosen)}")
     print(f"  log-loss sur {n_c} matchs : cotes Pinnacle {ll_ref:.4f} ; combinaison {ll_c / n_c:.4f}")
+    print("\n6. Tendance générale : matchs aux cotes voisines + matchs des deux équipes à leur cote, mis ensemble")
+
+    def pooled(m):
+        c = list(m["sim_n"])
+        (hw, hd, hl), (aw, ad, al) = m["team_res"]
+        c = [c[0] + hw + al, c[1] + hd + ad, c[2] + hl + aw]
+        n_ = sum(c)
+        return [max(x / n_, 1e-3) for x in c]
+
+    both = [m for m in tested if min(sum(r) for r in m["team_res"]) >= 10]
+    trend = {}
+    for label, sample in (("tous les matchs testés", tested), ("les deux équipes avec ≥ 10 matchs à leur cote", both)):
+        ll_pin = sum(_ll(m["f"], m["y"]) for m in sample) / len(sample)
+        ll_sim = sum(_ll([max(x, 1e-3) for x in m["sim"]], m["y"]) for m in sample) / len(sample)
+        ll_ten = sum(_ll(pooled(m), m["y"]) for m in sample) / len(sample)
+        hit = sum(max(range(3), key=pooled(m).__getitem__) == m["y"] for m in sample) / len(sample)
+        hit_pin = sum(max(range(3), key=m["f"].__getitem__) == m["y"] for m in sample) / len(sample)
+        trend.setdefault("matchs", len(sample))
+        trend.setdefault("logloss", round(ll_ten, 4))
+        trend.setdefault("logloss_pinnacle", round(ll_pin, 4))
+        trend.setdefault("reussite_pct", round(100 * hit, 1))
+        trend.setdefault("reussite_cote_pct", round(100 * hit_pin, 1))
+        print(f"  {label} ({len(sample)}) : log-loss cote {ll_pin:.4f} · cotes voisines {ll_sim:.4f} · "
+              f"tendance {ll_ten:.4f} ; issue la plus fréquente juste {100 * hit:.1f} % (cote : {100 * hit_pin:.1f} %)")
+    n = g = 0
+    for m in tested:
+        p_ = pooled(m)
+        for k in range(3):
+            if p_[k] * m["o"][k] > 1:
+                n += 1
+                g += (m["o"][k] - 1) if m["y"] == k else -1
+    trend_bets = (n, 100 * g / max(n, 1))
+    print(f"  parier quand la tendance × cote > 1 : {n} paris, rendement {trend_bets[1]:+.1f} %")
+
     print("\nPour cotes_historiques.TEST_HISTORIQUE :")
     print({"matchs": len(tested), "saisons": f"{_label(first_test)} à {_label(seasons[-1])}",
            "logloss_pinnacle": round(ll_p, 4), "logloss_similaires": round(ll_s, 4),
@@ -323,7 +361,8 @@ def run_test(precision=ch.PRECISION):
            "correlation_equipes": round(corr, 3), "equipes_saisons": len(xs),
            "paris_equipes": {"paris": team_bets[0], "roi_pct": round(team_bets[1], 1)},
            "zones": {"paris": zones[0], "roi_pct": round(zones[1], 1)},
-           "combinaison": {"matchs": n_c, "logloss": round(ll_c / n_c, 4), "logloss_pinnacle": round(ll_ref, 4)}})
+           "combinaison": {"matchs": n_c, "logloss": round(ll_c / n_c, 4), "logloss_pinnacle": round(ll_ref, 4)},
+           "tendance": {**trend, "paris": trend_bets[0], "roi_pct": round(trend_bets[1], 1)}})
 
 
 def lookup(cotes, precision, dom, ext):

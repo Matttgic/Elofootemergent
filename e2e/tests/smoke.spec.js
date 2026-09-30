@@ -185,6 +185,13 @@ test("cotes : matchs passés aux cotes similaires, équipes et test à l'aveugle
   await expect(page).toHaveURL(/dom=Paris\+SG/);
   await expect(page.getByTestId("equipe-domicile-result")).toContainText("Paris SG à une cote de victoire proche de 1,30");
   await expect(page.getByTestId("equipe-exterieur-result")).toContainText("Marseille");
+  // résumé : les trois sources puis tout mis ensemble, et la tendance
+  const tendance = page.getByTestId("cotes-tendance");
+  await expect(tendance.getByTestId("tendance-similaires")).toContainText("Tous les matchs à ces cotes");
+  await expect(tendance.getByTestId("tendance-domicile")).toContainText("Paris SG à une cote proche de 1,30");
+  await expect(tendance.getByTestId("tendance-exterieur")).toContainText("Marseille");
+  await expect(tendance.getByTestId("tendance-phrase")).toContainText("Tendance générale : victoire de Paris SG");
+  await expect(tendance).toContainText("Testée à l'aveugle");
   // précision plus large : plus de matchs comparables
   // « 2 855 matchs aux cotes similaires » (séparateur de milliers : espace insécable)
   const count = async () => Number((await page.getByTestId("cotes-similaires").locator("h2").innerText())
