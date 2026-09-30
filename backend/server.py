@@ -17,12 +17,12 @@ from starlette.middleware.cors import CORSMiddleware
 from core import client, db
 from football_client import get_token
 from jobs import catch_up_if_stale, ensure_indexes, run_full_guarded, run_light_guarded
-from routers import matches, players, stats
+from routers import cotes, matches, players, stats
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="FootPulse Analytics API")
-for module in (matches, players, stats):
+for module in (matches, players, stats, cotes):
     app.include_router(module.router)
 
 app.add_middleware(

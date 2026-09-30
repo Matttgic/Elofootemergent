@@ -23,7 +23,9 @@ backend/                   FastAPI + MongoDB (Motor), routes préfixées /api
   elo.py                   notes Elo (toutes compétitions, saisons précédentes), forme xG, modèle 1N2
   xg_ingest.py             xG par match (Understat) rattachés aux matchs football-data
   jobs.py                  synchronisations (ingestion puis règlement / prise des paris)
-  routers/                 matches.py (matchs, équipes, recherche), players.py, stats.py (stats, paris)
+  routers/                 matches.py (matchs, équipes, recherche), players.py, stats.py (stats, paris),
+                           cotes.py (page « Cotes »)
+  cotes_historiques.py     matchs passés aux cotes Pinnacle voisines (data/cotes_pinnacle.csv.gz)
   scoring.py, signals.py   notation /100 des équipes (forme), signaux (Poisson aligné sur l'Elo)
   player_scoring.py, player_form.py   notation et forme récente des joueurs
   betting.py               appariement cotes <-> matchs, Kelly, règlement des paris
@@ -31,6 +33,7 @@ backend/                   FastAPI + MongoDB (Motor), routes préfixées /api
   *_client.py              clients des sources externes
   teamnames.py             normalisation des noms d'équipe entre sources
   tools/backtest_historique.py   backtest du modèle sur 8 saisons (football-data.co.uk)
+  tools/cotes_historiques.py     historique des cotes Pinnacle : construction et test à l'aveugle
 frontend/                  React (CRA + craco), Tailwind, shadcn/ui, recharts
 memory/PRD.md              journal produit : objectifs, décisions, historique des livraisons
 ```
@@ -43,6 +46,7 @@ memory/PRD.md              journal produit : objectifs, décisions, historique d
 | Understat | statistiques joueurs (xG/xA) des 5 grands championnats | aucune |
 | FotMob | statistiques joueurs Portugal et Pays-Bas | aucune |
 | [The Odds API](https://the-odds-api.com/) (offre gratuite) | cotes 1N2 pour la simulation de paris | `ODDS_API_KEY` (optionnelle) |
+| [football-data.co.uk](https://www.football-data.co.uk/) | historique des cotes Pinnacle (page Cotes, fichier figé du dépôt) et backtests | aucune |
 
 Synchronisation automatique (UTC) : rafraîchissement léger des résultats chaque heure à
 hh:05 (1 appel API), analyse complète chaque jour à 04:30 (saison, classements, joueurs,
@@ -233,6 +237,36 @@ moins bien la dernière saison) ; avec la forme xG, cela dégrade même le modè
 cours, le modèle du site à la note seule. Reproduire :
 `python -m tools.backtest_historique --notes`.
 
+**Cotes similaires** (page **Cotes**, `GET /api/cotes/similaires?domicile=1.30&nul=5.75&exterieur=10.5`) :
+on entre les cotes 1N2 d'un match (et, si l'on veut, les deux équipes) ; le site retrouve les
+matchs passés dont les cotes Pinnacle à la clôture étaient proches (± 5 % par défaut sur
+chaque cote, marge du bookmaker retirée) et montre comment ils ont fini, puis les matchs de
+chaque équipe à une cote de victoire proche. Historique : football-data.co.uk, 160 868 matchs
+de 38 championnats, mars 2012 à janvier 2026 (le site ne publie plus les cotes Pinnacle
+depuis), figé dans `backend/data/cotes_pinnacle.csv.gz` (2,3 Mo, ≈ 30 Mo en mémoire, chargé
+en 1 s à la première requête). Un même triplet de cotes se répète rarement (75 % des matchs
+n'ont aucun jumeau exact), d'où la tolérance.
+
+Test à l'aveugle (chaque saison jouée avec les seules saisons précédentes, 148 353 matchs de
+2013-14 à 2025-26, cotes Pinnacle à la clôture) :
+
+| Idée | Résultat |
+| --- | --- |
+| Prévoir avec les fréquences des matchs aux cotes voisines | log-loss 1,0030 contre 1,0019 pour la cote seule |
+| Parier quand fréquence passée × cote > 1 | 90 364 paris, −3,8 % (parier tout : −4,0 %) |
+| … seulement quand l'écart dépasse 5 % | 21 639 paris, −7,0 % |
+| Une équipe qui bat ses cotes une saison, la suivante | corrélation +0,009 (6 967 équipes-saisons) |
+| Parier une équipe d'après son historique à cote proche | 41 604 paris, −2,4 % |
+| Rejouer les tranches de cotes rentables par le passé | 43 056 paris, −1,8 % |
+| Combiner cote, cotes voisines et équipes (poids réglés sur le passé) | poids de l'historique : 0 chaque saison |
+
+Les cotes Pinnacle sont presque parfaitement calibrées : l'historique ne dit rien de plus
+qu'elles. Seuls les très gros favoris (cote < 1,35) frôlent l'équilibre, les grosses cotes
+perdent beaucoup (−11 % à −38 % au-delà de 10). Construire le fichier :
+`python -m tools.cotes_historiques --build` (réseau) ; reproduire le test (hors ligne) :
+`python -m tools.cotes_historiques` ; recherche en ligne de commande :
+`python -m tools.cotes_historiques --cotes 1.30 5.75 10.5 --dom "Paris SG" --ext Marseille`.
+
 ## Tests
 
 ```bash
@@ -257,6 +291,7 @@ cd ../e2e && npm ci && npx playwright install chromium && npx playwright test
 
 - `tests/test_unit_models.py` : Elo et probabilités 1N2, notation, paris, noms d'équipe (hors ligne).
 - `tests/test_api_offline.py` : tous les endpoints sur une base MongoDB simulée (hors ligne).
+- `tests/test_cotes.py` : cotes similaires, équipes, fichier de l'historique Pinnacle et routes /api/cotes (hors ligne).
 - Les autres fichiers sont des tests d'intégration (marqueur `integration`) qui interrogent
   un backend déployé : ils ne tournent que si `REACT_APP_BACKEND_URL` est défini, par
   exemple `REACT_APP_BACKEND_URL=https://footpulse-api.onrender.com pytest`.

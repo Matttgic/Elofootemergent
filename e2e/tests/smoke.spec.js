@@ -161,3 +161,36 @@ test("comparateur : depuis une fiche équipe, probabilités selon le terrain", a
   await expect(page.getByTestId("compare-stats")).toContainText("Manchester City");
   expect(errors).toEqual([]);
 });
+
+test("cotes : matchs passés aux cotes similaires, équipes et test à l'aveugle", async ({ page }) => {
+  const errors = watchErrors(page);
+  // depuis la fiche d'un match (jeu de test : cotes 1,80 / 3,60 / 4,20) : ses cotes pré-remplies
+  await page.goto("/match/71");
+  await page.getByTestId("detail-odds-history").click();
+  await expect(page).toHaveURL(/\/cotes\?domicile=[\d.]+&nul=[\d.]+&exterieur=[\d.]+/);
+  await expect(page.getByTestId("cotes-similaires")).toContainText("matchs aux cotes similaires");
+  await expect(page.getByTestId("cotes-similaires").getByTestId("issue-cell")).toHaveCount(3);
+  // exemple avec deux équipes
+  await page.getByTestId("cotes-exemple").click();
+  await expect(page).toHaveURL(/dom=Paris\+SG/);
+  await expect(page.getByTestId("equipe-domicile-result")).toContainText("Paris SG à une cote de victoire proche de 1,30");
+  await expect(page.getByTestId("equipe-exterieur-result")).toContainText("Marseille");
+  // précision plus large : plus de matchs comparables
+  // « 2 855 matchs aux cotes similaires » (séparateur de milliers : espace insécable)
+  const count = async () => Number((await page.getByTestId("cotes-similaires").locator("h2").innerText())
+    .match(/^[\d\s\u00a0\u202f]+/)[0].replace(/\D/g, ""));
+  const before = await count();
+  await page.getByTestId("precision-15").click();
+  await expect(page).toHaveURL(/precision=15/);
+  await expect.poll(count).toBeGreaterThan(before);
+  await expect(page.getByTestId("cotes-verdict")).toContainText("Testé à l'aveugle");
+  await page.getByTestId("calibration-exterieur").click();
+  await expect(page.getByTestId("cotes-calibration").locator("tbody tr").first()).toContainText("1,15");
+  // cotes irréalistes (marge de 35 %) : refusées avec une explication
+  await page.getByTestId("cote-domicile").fill("1,30");
+  await page.getByTestId("cote-nul").fill("3");
+  await page.getByTestId("cote-exterieur").fill("4");
+  await page.getByTestId("cotes-submit").click();
+  await expect(page.getByTestId("cotes-error")).toContainText("marge de 35 %");
+  expect(errors).toEqual([]);
+});

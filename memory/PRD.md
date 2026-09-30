@@ -112,3 +112,10 @@ Voir Next Action Items du récap de finish.
 - [x] Cible d'hébergement gratuite : frontend Vercel (frontend/vercel.json, réécritures SPA), API Render (render.yaml, SCHEDULER_ENABLED=false), MongoDB Atlas M0, synchronisations GitHub Actions (.github/workflows/sync.yml : hh:05 léger, 04:30 UTC complet, lancement manuel)
 - [x] Backend : `python -m jobs light|full` (code de sortie ≠ 0 en cas d'échec), SCHEDULER_ENABLED, création des index partagée, CORS_ORIGINS vide = `*`
 - [x] Tests d'intégration opt-in via REACT_APP_BACKEND_URL ; 29 tests hors ligne ; .env.example backend/frontend ; README : guide de déploiement pas à pas
+
+### 2026-09-30 — Cotes similaires (historique Pinnacle)
+- [x] Page « Cotes » (/cotes, lien dans le menu et depuis les cotes d'une fiche match) : on entre 1 / N / 2 (+ équipes facultatives) ; matchs passés aux cotes Pinnacle voisines (± 3/5/10/15 % sur chaque cote sans marge) : fréquence réelle ± marge d'erreur, probabilité annoncée, seuil de rentabilité, rendement à la cote saisie, 10 exemples récents ; équipes à cote de victoire voisine (tous terrains)
+- [x] Historique figé : football-data.co.uk, 160 868 matchs, 38 championnats, 2012 → janvier 2026 (cotes Pinnacle à la clôture, plus publiées depuis) — backend/data/cotes_pinnacle.csv.gz, stockage en colonnes (≈ 30 Mo), aucune base
+- [x] API : GET /api/cotes/similaires (cotes irréalistes, marge > 20 % ou < −5 %, refusées avec explication), /api/cotes/equipes, /api/cotes/calibration
+- [x] Test à l'aveugle (tools/cotes_historiques.py) : l'historique n'apporte rien aux cotes (log-loss 1,0030 vs 1,0019) ; paris « historique favorable » −3,8 % à −7 % ; surperformance d'une équipe non reproductible (corrélation 0,009) ; combinaison : poids 0. Affiché sur la page (« Et pour gagner de l'argent ? ») avec la calibration par tranche de cote
+- [x] Tests : tests/test_cotes.py (9 tests hors ligne) + parcours Playwright de la page
