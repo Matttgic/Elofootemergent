@@ -1,6 +1,6 @@
-"""Client FotMob (source gratuite, sans clé) pour les statistiques individuelles
-des championnats non couverts par Understat : Primeira Liga (Portugal) et
-Eredivisie (Pays-Bas).
+"""Client FotMob (source gratuite, sans clé) pour les championnats non couverts par
+Understat : statistiques individuelles (Primeira Liga, Eredivisie) et xG par match
+(Primeira Liga, Eredivisie, Championship, Série A brésilienne).
 
 FotMob expose des fichiers JSON publics par statistique et par saison :
     https://data.fotmob.com/stats/{leagueId}/season/{seasonId}/{stat}.json
@@ -9,6 +9,7 @@ et la liste des saisons via :
 
 Aucune donnée n'est inventée : on lit uniquement ce que renvoie la source.
 """
+import asyncio
 import logging
 import httpx
 
@@ -22,6 +23,12 @@ HEADERS = {
                   "(KHTML, like Gecko) Chrome/120 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
 }
+
+# xG par match (données Opta affichées par FotMob) : code football-data -> ligue FotMob
+FOTMOB_XG_LEAGUES = {"PPL": 61, "DED": 57, "ELC": 48, "BSA": 268}
+CALENDAR_YEAR_LEAGUES = {"BSA"}          # saison sur l'année civile (« 2026 » et non « 2026/2027 »)
+LEAGUES_API = "https://www.fotmob.com/api/data/leagues"
+MATCH_API = "https://www.fotmob.com/api/data/matchDetails"
 
 DEEP = "https://www.fotmob.com/api/data/leagueseasondeepstats"
 DATA = "https://data.fotmob.com/stats/{lid}/season/{sid}/{stat}.json"
@@ -163,3 +170,79 @@ def fotmob_poste(positions):
     if c < 100:
         return "M"
     return "F"
+
+
+# ---------------------------------------------------------------------------
+# xG par match
+# ---------------------------------------------------------------------------
+def fotmob_season(code, year):
+    """Nom de saison FotMob pour une saison football-data (année de début)."""
+    return str(year) if code in CALENDAR_YEAR_LEAGUES else f"{year}/{year + 1}"
+
+
+def _score(score_str):
+    try:
+        h, a = (int(x) for x in (score_str or "").split("-"))
+        return h, a
+    except ValueError:
+        return None
+
+
+def fotmob_client():
+    return httpx.AsyncClient(timeout=40, headers=HEADERS, follow_redirects=True)
+
+
+async def fetch_finished_fixtures(client, league_id, season_name):
+    """Matchs terminés d'une saison : [{id, home, away, utc, score}]. Liste vide si
+    FotMob ne connaît pas cette saison (il renvoie alors la saison en cours)."""
+    r = await client.get(LEAGUES_API, params={"id": league_id, "season": season_name})
+    r.raise_for_status()
+    data = r.json()
+    if (data.get("details") or {}).get("selectedSeason") not in (season_name, None):
+        return []
+    if "allMatches" not in (data.get("fixtures") or {}):
+        # réponse partielle (arrive de temps en temps) : erreur, pour réessayer plus tard
+        raise RuntimeError(f"FotMob : liste des matchs absente ({league_id}, {season_name})")
+    out = []
+    for m in (data.get("fixtures") or {}).get("allMatches") or []:
+        st = m.get("status") or {}
+        if not st.get("finished") or st.get("cancelled") or not m.get("id"):
+            continue
+        out.append({"id": str(m["id"]), "home": (m.get("home") or {}).get("name"),
+                    "away": (m.get("away") or {}).get("name"), "utc": st.get("utcTime"),
+                    "score": _score(st.get("scoreStr"))})
+    return [f for f in out if f["home"] and f["away"] and f["utc"]]
+
+
+def match_xg(details):
+    """(xG domicile, xG extérieur) d'une fiche de match FotMob, ou None si absents."""
+    period = (((details.get("content") or {}).get("stats") or {}).get("Periods") or {}).get("All") or {}
+    for group in period.get("stats") or []:
+        for stat in group.get("stats") or []:
+            values = stat.get("stats") or []
+            if stat.get("key") == "expected_goals" and len(values) == 2 and None not in values:
+                try:
+                    return float(values[0]), float(values[1])
+                except (TypeError, ValueError):
+                    return None
+    return None
+
+
+async def fetch_matches_xg(client, match_ids, concurrency=4, pause=0.2):
+    """{identifiant FotMob: (xG dom, xG ext) ou None}. Les matchs en erreur réseau sont
+    absents du résultat (nouvel essai à la synchro suivante). Appels limités en
+    parallèle et espacés pour rester raisonnable avec la source."""
+    sem = asyncio.Semaphore(concurrency)
+    results = {}
+
+    async def one(mid):
+        async with sem:
+            try:
+                r = await client.get(MATCH_API, params={"matchId": mid})
+                r.raise_for_status()
+                results[mid] = match_xg(r.json())
+            except Exception as e:  # noqa: BLE001
+                logger.warning("FotMob xG match %s échec : %s", mid, e)
+            await asyncio.sleep(pause)
+    await asyncio.gather(*(one(mid) for mid in match_ids))
+    return results

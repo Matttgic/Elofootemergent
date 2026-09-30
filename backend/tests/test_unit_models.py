@@ -150,6 +150,27 @@ def test_xg_form_uses_only_past_matches():
     assert f["teams"][1][1] == 4 and xg_diff(*f["pre"][3]) is None and xg_diff(*f["pre"][4]) is not None
 
 
+def test_xg_form_is_specific_to_each_league():
+    """Une équipe qui change de championnat (promue, reléguée) repart sans forme xG ;
+    en coupe, c'est la forme de son championnat qui compte, et la coupe ne la modifie pas."""
+    ms = []
+    for i in range(1, 4):                 # équipe 1 dominée en « PL »…
+        m = _match(i, f"2025-03-{i:02d}T15:00:00Z", 1, 2, 0, 2)
+        m["competition_code"], m["xg"] = "PL", {"home": 0.4, "away": 2.4}
+        ms.append(m)
+    for i in range(1, 4):                 # … puis dominante en « ELC » la saison suivante
+        m = _match(10 + i, f"2025-09-{i:02d}T15:00:00Z", 1, 3, 3, 0)
+        m["competition_code"], m["xg"] = "ELC", {"home": 2.5, "away": 0.5}
+        ms.append(m)
+    cup = _match(20, "2025-09-10T20:00:00Z", 1, 4, 1, 1)
+    cup["competition_code"], cup["xg"] = "CL", {"home": 0.0, "away": 4.0}
+    ms.append(cup)
+    f = xg_form(ms, half_life=10, cups=("CL",))
+    assert f["pre"][11][:2] == (0.0, 0)                 # 1er match en ELC : pas de forme reprise de PL
+    assert f["pre"][13][0] > 1.9 and f["pre"][13][1] == 2
+    assert f["pre"][20][:2] == f["teams"][1] and f["teams"][1][1] == 3   # coupe : forme ELC, inchangée
+
+
 def test_two_feature_logit_recovers_coefficients():
     rng = random.Random(8)
     true = {"beta": 0.3, "beta_xg": 0.8, "theta_away": -0.7, "theta_draw": 0.45}

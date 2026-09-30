@@ -560,6 +560,70 @@ def test_xg_ingest_attaches_understat_xg(api, monkeypatch):
     assert again["appels"] == 1 and calls.count(("EPL", NOW.year)) == 2
 
 
+def test_xg_ingest_fotmob_by_results_with_budget(api, monkeypatch):
+    """xG FotMob (Eredivisie) : noms d'équipes appris sur les résultats (même jour, même
+    score) quand ils diffèrent trop, fiches de match lues dans la limite du budget,
+    match sans xG marqué pour ne pas être relu, erreur réseau relue plus tard."""
+    import server
+    import xg_ingest
+    fd = {1: ("PSV", "PSV"), 2: ("AFC Ajax", "Ajax"), 3: ("Feyenoord Rotterdam", "Feyenoord"),
+          4: ("Stichting Heracles Almelo", "Heracles")}
+    fm = {1: "PSV Eindhoven", 2: "Ajax", 3: "Feyenoord", 4: "Heracles Almelo NV"}
+    pairs = [(1, 2), (3, 4), (1, 3), (2, 4), (1, 4), (2, 3), (2, 1), (4, 3), (3, 1), (4, 2), (4, 1), (3, 2)]
+    docs, fixtures = [], []
+    for k, (h, a) in enumerate(pairs):
+        kick = NOW.replace(hour=18) - timedelta(days=60 - 3 * k)
+        gh, ga = k % 3, (k + 1) % 2
+        docs.append({"match_id": 90000 + k, "competition_code": "DED", "status": "FINISHED", "utc_date": iso(kick),
+                     "home_team": {"id": 900 + h, "name": fd[h][0], "shortName": fd[h][1]},
+                     "away_team": {"id": 900 + a, "name": fd[a][0], "shortName": fd[a][1]},
+                     "score": {"fullTime": {"home": gh, "away": ga}}})
+        fixtures.append({"id": f"f{k}", "home": fm[h], "away": fm[a], "score": (gh, ga),
+                         "utc": iso(kick + timedelta(hours=8 if k % 2 else 0))})
+    seasons, detail_calls = [], []
+
+    async def fake_fixtures(client, league_id, season_name):
+        seasons.append((league_id, season_name))
+        return fixtures
+
+    async def fake_xg(client, ids):
+        detail_calls.extend(ids)
+        out = {i: (1.2, 0.8) for i in ids}
+        out["f5"] = None                                  # pas d'xG pour ce match
+        if detail_calls.count("f7") == 1:
+            out.pop("f7", None)                           # erreur réseau la 1re fois
+        return {i: v for i, v in out.items() if i in ids}
+
+    async def no_understat(league, season):
+        return []
+
+    async def scenario():
+        db = server.db
+        await db.meta.delete_one({"_id": "xg"})
+        await db.matches.insert_many([dict(d) for d in docs])
+        first = await xg_ingest.ingest_xg_fotmob(db, budget=5)
+        second = await xg_ingest.ingest_xg_fotmob(db)
+        third = await xg_ingest.ingest_xg_fotmob(db)
+        with_xg = await db.matches.count_documents({"competition_code": "DED", "xg.source": "fotmob", "xg.home": 1.2})
+        absent = await db.matches.count_documents({"competition_code": "DED", "xg.absent": True})
+        state = (await db.meta.find_one({"_id": "xg"}))["saisons"][f"DED-{NOW.year}"]
+        await db.matches.delete_many({"competition_code": "DED"})
+        return first, second, third, with_xg, absent, state
+
+    monkeypatch.setattr(xg_ingest, "fetch_finished_fixtures", fake_fixtures)
+    monkeypatch.setattr(xg_ingest, "fetch_matches_xg", fake_xg)
+    monkeypatch.setattr(xg_ingest, "fetch_league_matches", no_understat)
+    monkeypatch.setattr(xg_ingest, "current_season", lambda: NOW.year)
+    monkeypatch.setenv("COMPETITIONS", "PL,DED")
+    first, second, third, with_xg, absent, state = asyncio.run(scenario())
+    assert seasons[0] == (57, f"{NOW.year}/{NOW.year + 1}")
+    assert first["fiches"] == 5 and first["non_rattaches"] == 0 and first["restant"] == 7
+    assert second["fiches"] == 7 and second["restant"] == 1                 # f7 : erreur réseau
+    assert third["fiches"] == 1 and third["restant"] == 0                   # f7 relu, et lui seul
+    assert detail_calls.count("f7") == 2 and detail_calls.count("f5") == 1  # match sans xG : pas relu
+    assert with_xg == 11 and absent == 1 and state["statut"] == "ok"
+
+
 def test_sync_command_fails_loudly_without_token(api, capsys):
     """`python -m jobs light` renvoie un code d'erreur si le jeton manque (visible dans le cron)."""
     import jobs

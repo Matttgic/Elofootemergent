@@ -122,6 +122,7 @@ test("méthodologie et recherche", async ({ page }) => {
   await expect(page.getByTestId("methodo-method-ranking-site")).toContainText("Pronostic FootPulse");
   await expect(page.getByTestId("methodo-backtest").locator("table").first().locator("tbody tr")).toHaveCount(5);
   await expect(page.getByTestId("methodo-backtest-xg").locator("tbody tr")).toHaveCount(4);
+  await expect(page.getByTestId("methodo-backtest-fotmob").locator("tbody tr")).toHaveCount(5);
   await expect(page.getByTestId("methodo-backtest-notes").locator("tbody tr")).toHaveCount(7);
   await expect(page.getByTestId("methodo-notes-conclusion")).toContainText("Elo (+ xG)");
   await expect(page.getByTestId("methodo-xg")).toContainText("xG");

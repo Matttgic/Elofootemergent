@@ -267,32 +267,44 @@ def _xg(m):
     return (h, a) if h is not None and a is not None else None
 
 
-def xg_form(matches, half_life=XG_HALF_LIFE):
+def xg_form(matches, half_life=XG_HALF_LIFE, cups=()):
     """Écart d'xG récent de chaque équipe (xG pour − xG contre, moyenne à décroissance
     exponentielle : un match compte moitié moins `half_life` matchs plus tard), AVANT
     chaque match terminé, et sa valeur actuelle. Seuls les matchs avec xG comptent.
+
+    La forme est propre à chaque championnat : un écart d'xG n'a de sens que face aux
+    adversaires du même niveau (une équipe reléguée dominée en Premier League domine
+    souvent le Championship). Une équipe qui change de championnat repart donc sans forme
+    xG ; en coupe (`cups`), c'est la forme de son championnat qui compte.
     Retourne {"pre": {match_id: (forme_dom, n_dom, forme_ext, n_ext)},
-              "teams": {team_id: (forme, n)}} (n = nombre de matchs avec xG)."""
+              "teams": {team_id: (forme, n)}} (forme dans son championnat actuel ;
+    n = nombre de matchs avec xG)."""
     decay = 0.5 ** (1 / half_life)
-    state, pre = {}, {}
+    cups = set(cups)
+    state, pre, league = {}, {}, {}
 
     def value(s):
         return s[0] / s[1] if s[1] else 0.0
 
     for m in sorted(filter(_finished, matches), key=lambda m: m["utc_date"]):
+        code = m.get("competition_code")
         hid, aid = m["home_team"]["id"], m["away_team"]["id"]
-        sh = state.setdefault(hid, [0.0, 0.0, 0])
-        sa = state.setdefault(aid, [0.0, 0.0, 0])
+        cup = code in cups
+        if not cup:
+            league[hid] = league[aid] = code
+        sh = state.setdefault((hid, league.get(hid, code)), [0.0, 0.0, 0])
+        sa = state.setdefault((aid, league.get(aid, code)), [0.0, 0.0, 0])
         pre[m["match_id"]] = (value(sh), sh[2], value(sa), sa[2])
         xg = _xg(m)
-        if not xg:
+        if not xg or cup:
             continue
         diff = xg[0] - xg[1]
         for s, sign in ((sh, 1), (sa, -1)):
             s[0] = decay * s[0] + sign * diff
             s[1] = decay * s[1] + 1
             s[2] += 1
-    return {"pre": pre, "teams": {t: (value(s), s[2]) for t, s in state.items()}}
+    teams = {tid: (value(state[(tid, lg)]), state[(tid, lg)][2]) for tid, lg in league.items() if (tid, lg) in state}
+    return {"pre": pre, "teams": teams}
 
 
 def xg_diff(form_dom, n_dom, form_ext, n_ext, min_matches=XG_MIN_MATCHES):
@@ -348,6 +360,24 @@ BACKTEST = {
             {"modele": "Elo + forme xG (site)", "valeur": 0.983, "brier": 0.586},
             {"modele": "Pinnacle à la clôture", "valeur": 0.968, "brier": 0.576},
         ],
+    },
+    # xG FotMob (Opta) du Championship, du Portugal et des Pays-Bas, forme xG par championnat :
+    # 8 championnats, saisons 2024-25 à 2026-27 (tools/backtest_historique.py --fotmob)
+    "xg_fotmob": {
+        "matchs": 4241,
+        "periode": "2024-25 à 2026-27",
+        "lignes": [
+            {"groupe": "Les 8 championnats", "elo": 0.9879, "site": 0.9794, "pinnacle": 0.9674},
+            {"groupe": "5 grands (xG Understat)", "elo": 0.9847, "site": 0.9735, "pinnacle": 0.9611},
+            {"groupe": "Championship (xG FotMob)", "elo": 1.0447, "site": 1.0426, "pinnacle": 1.0318},
+            {"groupe": "Primeira Liga (xG FotMob)", "elo": 0.9323, "site": 0.9279, "pinnacle": 0.9154},
+            {"groupe": "Eredivisie (xG FotMob)", "elo": 0.9587, "site": 0.9506, "pinnacle": 0.9390},
+        ],
+        "conclusion": "La forme xG est propre à chaque championnat : une équipe promue ou reléguée repart "
+                      "sans forme xG, car un écart d'xG ne vaut que face à des adversaires du même niveau. "
+                      "Sans cette précaution, les xG du Championship dégradaient les prévisions des promus en "
+                      "Premier League, et ceux de Premier League celles des relégués (0,9816 → 0,9832 sur les "
+                      "8 championnats). Le Brésil utilise la même méthode (pas d'historique de cotes pour le tester).",
     },
     # Note /100 comme modèle 1N2 (logit ordonné sur l'écart des notes avant le match), seule
     # ou combinée à l'Elo : 8 championnats, matchs où les deux notes existent (3 matchs joués)
@@ -414,12 +444,13 @@ def elo_config():
                         "ajusté sur les matchs passés : pour un écart Elo donné, il reproduit la fréquence "
                         "observée de chaque issue. Les scores probables suivent une loi de Poisson dont la "
                         "répartition des buts est alignée sur ces probabilités.",
-        "xg": "Dans les 5 grands championnats, le modèle ajoute la forme xG de chaque équipe : "
-              "la différence entre les expected goals (xG, qualité des occasions, source Understat) "
-              f"créés et concédés, moyennée sur ses derniers matchs (demi-vie de {XG_HALF_LIFE} matchs). "
-              "Les xG mesurent la domination mieux que le score, souvent décidé par peu d'occasions. "
-              f"Il faut au moins {XG_MIN_MATCHES} matchs avec xG pour chaque équipe ; sinon, ou hors "
-              "de ces championnats, seul l'Elo est utilisé.",
+        "xg": "Dans les championnats suivis, le modèle ajoute la forme xG de chaque équipe : "
+              "la différence entre les expected goals (xG, qualité des occasions) créés et concédés, "
+              f"moyennée sur ses derniers matchs (demi-vie de {XG_HALF_LIFE} matchs). Sources : Understat "
+              "pour les 5 grands championnats ; FotMob (données Opta) pour le Portugal, les Pays-Bas, le "
+              "Championship et le Brésil. Les xG mesurent la domination mieux que le score, souvent décidé "
+              f"par peu d'occasions. Il faut au moins {XG_MIN_MATCHES} matchs avec xG pour chaque équipe ; "
+              "sinon (début de saison, promus, coupes), seul l'Elo est utilisé.",
         "value": "Une « value » signale une issue dont la probabilité estimée dépasse d'au moins 5 % celle "
                  "qu'implique la cote du bookmaker. Sur l'historique, ces écarts n'ont pas été rentables : "
                  "les bookmakers restent plus précis que le modèle.",

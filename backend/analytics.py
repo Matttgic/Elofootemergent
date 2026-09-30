@@ -172,7 +172,7 @@ class EloData:
         self.history, self.league, self.played = run["history"], run["league"], run["played"]
         self.coefs = fit_outcome_model(matches, self.pre)
         # 2e modèle, utilisé quand les deux équipes ont des xG récents (5 grands championnats)
-        self.xg = xg_form(matches)
+        self.xg = xg_form(matches, cups=cups)
         self.coefs_xg = fit_outcome_model_xg(matches, self.pre, self.xg)
         # Championnat de la saison en cours : une équipe sortie des championnats suivis
         # (reléguée plus bas, par exemple) n'est plus classée avec son ancien championnat.
