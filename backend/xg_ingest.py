@@ -199,10 +199,13 @@ async def ingest_xg_fotmob(db, now=None, budget=FOTMOB_BUDGET):
     if not codes:
         return stats
     async with fotmob_client() as client:
-        for code in codes:
-            # saison sur l'année civile au Brésil (la saison 2027 commence en avril 2027)
-            season_now = now.year if code in CALENDAR_YEAR_LEAGUES else current_season()
-            for season in range(season_now, season_now - HISTORY_SEASONS - 1, -1):
+        # saisons en cours de tous les championnats d'abord (elles servent aux pronostics),
+        # puis les saisons précédentes, dans la limite du budget
+        for offset in range(HISTORY_SEASONS + 1):
+            for code in codes:
+                # saison sur l'année civile au Brésil (la saison 2027 commence en avril 2027)
+                season_now = now.year if code in CALENDAR_YEAR_LEAGUES else current_season()
+                season = season_now - offset
                 key = f"{code}-{season}"
                 if season != season_now and _skip_history(done.get(key) or {}, now):
                     continue
