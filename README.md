@@ -269,10 +269,12 @@ La page et la fiche match montrent aussi les **scores exacts les plus fréquents
 
 **Fiche match « Selon les cotes historiques »** (`GET /api/match/{id}/cotes-historiques`) : le même
 décompte, les scores les plus fréquents, les équipes et la tendance, directement sur la fiche d'un
-match. Les cotes viennent de football-data.co.uk (sans clé), rattachées à chaque synchro complète
-par `cotes_ingest.py` : moyenne des bookmakers avant le match (`fixtures.csv`, publié en fin de
-semaine pour le week-end et en début de semaine pour le milieu), puis à la clôture une fois le match
-joué (fichier de la saison). Championnats : Premier League, Championship, Liga, Serie A, Bundesliga,
+match. Les cotes viennent de football-data.co.uk (sans clé), rattachées par `cotes_ingest.py` :
+moyenne des bookmakers avant le match (`fixtures.csv`, publié en fin de semaine pour le week-end et
+en début de semaine pour le milieu), puis à la clôture une fois le match joué (fichier de la saison).
+La synchro complète relit tout et mémorise la correspondance des noms d'équipes ; la synchro horaire
+ne relit que les deux petits fichiers des matchs à venir, pour que leurs cotes arrivent dans l'heure
+qui suit leur publication (des cotes à la clôture ne sont jamais remplacées). Championnats : Premier League, Championship, Liga, Serie A, Bundesliga,
 Ligue 1, Liga Portugal, Eredivisie et Brésil (pas les coupes). Les noms d'équipes football-data.co.uk,
 ceux de l'historique, sont appris sur les résultats (même méthode que les xG). Sans ces cotes, la
 fiche utilise celles de la simulation de paris (The Odds API) quand il y en a.

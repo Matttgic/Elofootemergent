@@ -82,9 +82,11 @@ def team_map(fixtures, fd_matches):
     return mapping
 
 
-def pair_fixtures(fixtures, fd_matches):
-    """([(match de la source, match_id football-data)], nombre de matchs non rapprochés)."""
-    tmap = team_map(fixtures, fd_matches)
+def pair_fixtures(fixtures, fd_matches, tmap=None):
+    """([(match de la source, match_id football-data)], nombre de matchs non rapprochés).
+    `tmap` : correspondance des noms déjà connue (sinon apprise ici)."""
+    if tmap is None:
+        tmap = team_map(fixtures, fd_matches)
     index = {}
     for m in fd_matches:
         key = ((m.get("home_team") or {}).get("id"), (m.get("away_team") or {}).get("id"))

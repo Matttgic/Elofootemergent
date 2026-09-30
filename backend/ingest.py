@@ -94,7 +94,13 @@ async def run_light_ingest(db):
             upsert=True,
         )
         logger.info("Rafraîchissement léger: %s matchs mis à jour (1 appel API)", count)
-        return {"ok": True, "mode": "leger", "matchs_maj": count, "appels_api": 1}
+        try:
+            from cotes_ingest import ingest_cotes_a_venir   # import local : cotes_ingest dépend de ce module
+            cotestats = await ingest_cotes_a_venir(db, now)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Cotes à venir football-data.co.uk échec : %s", e)
+            cotestats = {"ok": False}
+        return {"ok": True, "mode": "leger", "matchs_maj": count, "appels_api": 1, "cotes": cotestats}
     except Exception as e:  # noqa: BLE001
         logger.error("Rafraîchissement léger échoué: %s", e)
         return {"ok": False, "raison": str(e)}
