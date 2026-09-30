@@ -74,10 +74,11 @@ def team_map(fixtures, fd_matches):
         if n >= 2 and name not in mapping and tid not in used:
             mapping[name] = tid
             used.add(tid)
-    rest = sorted({f["home"] for f in fixtures} | {f["away"] for f in fixtures} - set(mapping))
-    if rest:
-        for name, tid in build_team_map(rest, [t for i, t in teams.items() if i not in used]).items():
-            mapping[name] = tid
+    rest = sorted(({f["home"] for f in fixtures} | {f["away"] for f in fixtures}) - set(mapping))
+    free = [t for i, t in teams.items() if i not in used]
+    if rest and free:
+        for name, tid in build_team_map(rest, free).items():
+            mapping.setdefault(name, tid)
     return mapping
 
 
