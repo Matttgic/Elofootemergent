@@ -24,6 +24,10 @@ NAMES = ["Arsenal FC", "Chelsea FC", "Liverpool FC", "Manchester City FC", "Manc
          "Crystal Palace FC", "Wolverhampton Wanderers FC", "Nottingham Forest FC",
          "Brighton & Hove Albion FC", "AFC Bournemouth"]
 NOW = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+# mêmes équipes, noms football-data.co.uk (ceux de l'historique des cotes)
+COUK = ["Arsenal", "Chelsea", "Liverpool", "Man City", "Man United", "Tottenham", "Newcastle", "Aston Villa",
+        "Everton", "Fulham", "Brentford", "Burnley", "Leeds", "Sunderland", "West Ham", "Crystal Palace",
+        "Wolves", "Nott'm Forest", "Brighton", "Bournemouth"]
 
 
 def team(i):
@@ -57,6 +61,12 @@ def dataset():
                 "score": {"fullTime": {"home": min(6, int(rng.expovariate(1 / strength[h]))) if played else None,
                                        "away": min(6, int(rng.expovariate(1 / strength[a]))) if played else None}},
             })
+    # cotes football-data.co.uk d'un match à venir (fiche match « Selon les cotes historiques »)
+    m86 = next(m for m in matches if m["match_id"] == 86)
+    m86["cotes_ref"] = {"domicile": 2.10, "nul": 3.40, "exterieur": 3.60, "type": "avant-match",
+                        "source": "football-data.co.uk (moyenne des bookmakers)",
+                        "equipe_domicile": COUK[m86["home_team"]["id"] - 1],
+                        "equipe_exterieur": COUK[m86["away_team"]["id"] - 1]}
     for k, (h, a, gh, ga) in enumerate([(1, 4, 2, 1), (4, 3, 0, 0), (3, 1, 1, 2)]):
         kick = NOW - timedelta(days=20 - 7 * k)
         matches.append({"match_id": 1000 + k, "competition_code": "CL", "utc_date": iso(kick),
@@ -502,6 +512,12 @@ def test_light_and_full_ingest_write_matches_in_bulk(api, monkeypatch):
     import xg_ingest
     monkeypatch.setattr(xg_ingest, "ingest_xg", no_xg)
 
+    async def no_cotes(db, now=None):
+        return {"rattaches": 0}
+
+    import cotes_ingest
+    monkeypatch.setattr(cotes_ingest, "ingest_cotes", no_cotes)
+
     async def scenario():
         db = server.db
         await db.meta.delete_one({"_id": "history"})
@@ -518,8 +534,74 @@ def test_light_and_full_ingest_write_matches_in_bulk(api, monkeypatch):
 
     light, full, ids, hist = asyncio.run(scenario())
     assert light["ok"] and light["matchs_maj"] == 2          # BL1 hors des compétitions suivies
-    assert full["ok"] and full["matchs"] == 2 and full["historique"] == 2
+    assert full["ok"] and full["matchs"] == 2 and full["historique"] == 2 and full["cotes"] == {"rattaches": 0}
     assert ids == {70001, 70002, 70004} and hist == 2
+
+
+def test_cotes_ingest_attaches_couk_odds(api, monkeypatch):
+    """Cotes football-data.co.uk rattachées aux matchs : noms appris sur les résultats,
+    clôture pour les matchs joués, avant-match pour les matchs à venir."""
+    import server
+    import cotes_ingest
+    cur = cotes_ingest._season_code(NOW)[0]
+
+    def day(m):
+        d = datetime.fromisoformat(m["utc_date"].replace("Z", "+00:00"))
+        return d.strftime("%d/%m/%Y"), d.strftime("%H:%M")
+
+    async def scenario():
+        db = server.db
+        docs = await db.matches.find({"competition_code": "PL"}).to_list(1000)
+        names = lambda m: (COUK[m["home_team"]["id"] - 1], COUK[m["away_team"]["id"] - 1])  # noqa: E731
+        season = ["Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,AvgH,AvgD,AvgA,AvgCH,AvgCD,AvgCA"]
+        upcoming = ["Div,Date,Time,HomeTeam,AwayTeam,AvgH,AvgD,AvgA"]
+        for m in docs:
+            (d, t), (h, a) = day(m), names(m)
+            if m["status"] == "FINISHED":
+                ft = m["score"]["fullTime"]
+                season.append(f"E0,{d},{t},{h},{a},{ft['home']},{ft['away']},2.2,3.4,3.3,2.0,3.5,3.8")
+            else:
+                upcoming.append(f"E0,{d},{t},{h},{a},1.9,3.6,4.1")
+        soon = (NOW + timedelta(days=3)).strftime("%d/%m/%Y")
+        upcoming.append(f"E0,{soon},15:00,Ghost Town,Nowhere City,2.0,3.4,3.8")   # équipes inconnues
+        upcoming.append(f"D1,{soon},15:00,Bayern Munich,Dortmund,1.5,4.5,6.0")   # autre championnat
+        files = {"fixtures.csv": "\n".join(upcoming), f"mmz4281/{cur}/E0.csv": "\n".join(season)}
+
+        async def fake_fetch(client, path):
+            return files.get(path, "")
+
+        monkeypatch.setattr(cotes_ingest, "_fetch", fake_fetch)
+        stats = await cotes_ingest.ingest_cotes(db, NOW, client=object())
+        clo = await db.matches.count_documents({"cotes_ref.type": "cloture", "cotes_ref.domicile": 2.0})
+        ava = await db.matches.count_documents({"cotes_ref.type": "avant-match", "cotes_ref.domicile": 1.9})
+        one = await db.matches.find_one({"match_id": 86}, {"cotes_ref": 1, "home_team": 1})
+        # remise en état : seules les cotes du jeu de test (match 86) restent
+        original = next(m for m in dataset()[0] if m["match_id"] == 86)["cotes_ref"]
+        await db.matches.update_many({}, {"$unset": {"cotes_ref": ""}})
+        await db.matches.update_one({"match_id": 86}, {"$set": {"cotes_ref": original}})
+        played = sum(m["status"] == "FINISHED" for m in docs)
+        return stats, clo, ava, one, played, len(docs) - played
+
+    monkeypatch.setenv("COMPETITIONS", "PL")
+    stats, clo, ava, one, played, to_come = asyncio.run(scenario())
+    assert clo == played >= 80 and ava == to_come >= 10 and stats["rattaches"] == played + to_come
+    assert stats["a_venir_non_rattaches"] == 1 and stats["championnats"] == 1
+    assert one["cotes_ref"]["equipe_domicile"] == COUK[one["home_team"]["id"] - 1]
+    assert one["cotes_ref"]["source"].startswith("football-data.co.uk")
+
+
+def test_match_odds_history(api):
+    """Fiche match : matchs passés aux mêmes cotes (cotes football-data.co.uk avec les
+    noms de l'historique, sinon cotes de la simulation de paris)."""
+    d = api.get("/api/match/86/cotes-historiques").json()
+    assert d["disponible"] and d["source"]["type"] == "avant-match"
+    assert d["similaires"]["matchs"] > 1000 and d["similaires"]["scores"][0]["pct"] > 0
+    assert d["equipe_domicile"]["nom"] == "Brentford" and d["equipe_exterieur"]["nom"] == "Chelsea"
+    assert d["tendance"]["matchs"] >= d["similaires"]["matchs"]
+    d = api.get("/api/match/71/cotes-historiques").json()          # cotes des paris (1,80 / 3,60 / 4,20)
+    assert d["disponible"] and d["source"]["nom"] == "betclic_fr" and d["tendance"] is None
+    assert api.get("/api/match/1000/cotes-historiques").json() == {"disponible": False}   # aucune cote
+    assert api.get("/api/match/999999/cotes-historiques").status_code == 404
 
 
 def test_xg_ingest_attaches_understat_xg(api, monkeypatch):

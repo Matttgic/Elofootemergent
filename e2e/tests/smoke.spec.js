@@ -162,6 +162,27 @@ test("comparateur : depuis une fiche équipe, probabilités selon le terrain", a
   expect(errors).toEqual([]);
 });
 
+test("fiche match : selon les cotes historiques (décompte, scores, équipes, tendance)", async ({ page }) => {
+  const errors = watchErrors(page);
+  // jeu de test : match 86 (Brentford – Chelsea) avec des cotes football-data.co.uk 2,10 / 3,40 / 3,60
+  await page.goto("/match/86");
+  const panel = page.getByTestId("match-odds-history");
+  await expect(panel).toContainText("Selon les cotes historiques");
+  await expect(panel).toContainText("2,10 / 3,40 / 3,60");
+  const n = async (id) => Number((await panel.getByTestId(id).locator("div").first().innerText()).replace(/\D/g, ""));
+  expect((await n("resume-domicile")) + (await n("resume-nul")) + (await n("resume-exterieur"))).toBeGreaterThan(1000);
+  await expect(panel.getByTestId("match-odds-scores")).toContainText("1-1");
+  await expect(panel.getByTestId("tendance-domicile")).toContainText("Brentford");
+  await expect(panel.getByTestId("tendance-scores")).toBeVisible();
+  await panel.getByTestId("match-odds-link").click();
+  await expect(page).toHaveURL(/\/cotes\?domicile=2\.1&nul=3\.4&exterieur=3\.6&dom=Brentford&ext=Chelsea/);
+  await expect(page.getByTestId("similaires-scores")).toBeVisible();
+  // match de coupe sans cotes : message
+  await page.goto("/match/1000");
+  await expect(page.getByTestId("match-odds-history-none")).toContainText("pas encore de cotes");
+  expect(errors).toEqual([]);
+});
+
 test("cotes : matchs passés aux cotes similaires, équipes et test à l'aveugle", async ({ page }) => {
   const errors = watchErrors(page);
   // depuis la fiche d'un match (jeu de test : cotes 1,80 / 3,60 / 4,20) : ses cotes pré-remplies

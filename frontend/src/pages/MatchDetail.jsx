@@ -8,6 +8,7 @@ import { DataUnavailable } from "../components/DataUnavailable";
 import { FormChips } from "../components/FormChips";
 import { OddsLine, ValueBadge } from "../components/Probabilities";
 import { BestMethodBadge, ForecastNumbers, ModelTag, MODEL_NAME } from "../components/Forecast";
+import { MatchOddsHistory } from "../components/OddsHistory";
 import { frDate, kickoff, scoreColor } from "../lib/format";
 import { Skeleton } from "../components/ui/skeleton";
 import { ArrowLeft, Trophy, Users, History, Swords, Scale } from "lucide-react";
@@ -287,6 +288,8 @@ export default function MatchDetail() {
           </div>
         );
       })()}
+
+      <MatchOddsHistory matchId={id} />
 
       <TeamsComparison home={home} away={away} code={m.competition?.code} noteHist={noteHist} />
 

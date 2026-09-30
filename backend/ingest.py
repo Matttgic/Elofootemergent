@@ -228,5 +228,13 @@ async def run_ingest(db):
         logger.error("xG Understat échec : %s", e)
         xgstats = {"ok": False}
 
+    try:
+        from cotes_ingest import ingest_cotes   # import local : cotes_ingest dépend de ce module
+        cotestats = await ingest_cotes(db, now)
+        logger.info("Cotes football-data.co.uk : %s", cotestats)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Cotes football-data.co.uk échec : %s", e)
+        cotestats = {"ok": False}
+
     return {"ok": True, "synced_at": now.isoformat(), **stats,
-            "joueurs": pstats, "joueurs_fotmob": fmstats, "xg": xgstats}
+            "joueurs": pstats, "joueurs_fotmob": fmstats, "xg": xgstats, "cotes": cotestats}

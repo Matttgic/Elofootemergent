@@ -16,7 +16,7 @@ _lock = asyncio.Lock()
 MIN_OVERROUND, MAX_OVERROUND = 0.95, 1.2
 
 
-async def _historique():
+async def historique_charge():
     async with _lock:           # un seul chargement, hors de la boucle asynchrone
         h = await asyncio.to_thread(ch.historique)
     if h is None:
@@ -52,14 +52,14 @@ async def cotes_similaires(
     if overround < MIN_OVERROUND:
         raise HTTPException(422, f"Cotes irréalistes : trop hautes pour un même bookmaker (parier les trois issues "
                                  f"rapporterait {100 * (1 / overround - 1):.0f} % à coup sûr). Vérifie les trois cotes.")
-    h = await _historique()
+    h = await historique_charge()
     res = await asyncio.to_thread(ch.recherche, h, cotes, precision, equipe_domicile, equipe_exterieur)
     return {**res, "historique": ch.resume(h)}
 
 
 @router.get("/cotes/equipes")
 async def cotes_equipes():
-    h = await _historique()
+    h = await historique_charge()
     return {"equipes": await asyncio.to_thread(_equipes, h)}
 
 
@@ -67,6 +67,7 @@ async def cotes_equipes():
 async def cotes_calibration():
     """Par tranche de cote : probabilité annoncée par Pinnacle, fréquence réelle et
     rendement, plus le test à l'aveugle des stratégies « mêmes cotes »."""
-    h = await _historique()
+    h = await historique_charge()
     return {"historique": ch.resume(h), "calibration": await asyncio.to_thread(_calibration, h),
             "test": ch.TEST_HISTORIQUE}
+
