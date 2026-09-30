@@ -624,6 +624,56 @@ def test_xg_ingest_fotmob_by_results_with_budget(api, monkeypatch):
     assert with_xg == 11 and absent == 1 and state["statut"] == "ok"
 
 
+def test_xg_fotmob_current_seasons_before_history(api, monkeypatch):
+    """Budget limité : les saisons en cours de tous les championnats passent avant les
+    saisons précédentes (elles servent aux pronostics à venir)."""
+    import server
+    import xg_ingest
+
+    def match(mid, code, days, home, away, season=None):
+        kick = NOW.replace(hour=18) - timedelta(days=days)
+        doc = {"match_id": mid, "competition_code": code, "status": "FINISHED", "utc_date": iso(kick),
+               "home_team": {"id": mid * 10 + 1, "name": home}, "away_team": {"id": mid * 10 + 2, "name": away},
+               "score": {"fullTime": {"home": 1, "away": 0}}}
+        return {**doc, "season": season} if season else doc
+    current = [match(91001, "DED", 10, "Ajax", "PSV"), match(91002, "DED", 5, "Twente", "Utrecht"),
+               match(91003, "PPL", 9, "Benfica", "Porto"), match(91004, "PPL", 4, "Braga", "Sporting")]
+    history = [match(91005, "PPL", 300, "Guimaraes", "Famalicao", NOW.year - 1),
+               match(91006, "PPL", 290, "Estoril", "Arouca", NOW.year - 1)]
+    order, fetched = [], []
+
+    async def fake_fixtures(client, league_id, season_name):
+        code = {57: "DED", 61: "PPL"}[league_id]
+        order.append((code, season_name))
+        docs = [m for m in current + history if m["competition_code"] == code
+                and season_name == f"{m.get('season', NOW.year)}/{m.get('season', NOW.year) + 1}"]
+        return [{"id": str(m["match_id"]), "home": m["home_team"]["name"], "away": m["away_team"]["name"],
+                 "utc": m["utc_date"], "score": (1, 0)} for m in docs]
+
+    async def fake_xg(client, ids):
+        fetched.extend(ids)
+        return {i: (1.0, 0.5) for i in ids}
+
+    async def scenario():
+        db = server.db
+        await db.meta.delete_one({"_id": "xg"})
+        await db.matches.insert_many([dict(d) for d in current])
+        await db.matches_history.insert_many([dict(d) for d in history])
+        stats = await xg_ingest.ingest_xg_fotmob(db, budget=4)
+        await db.matches.delete_many({"match_id": {"$gte": 91000, "$lt": 92000}})
+        await db.matches_history.delete_many({"match_id": {"$gte": 91000, "$lt": 92000}})
+        return stats
+
+    monkeypatch.setattr(xg_ingest, "fetch_finished_fixtures", fake_fixtures)
+    monkeypatch.setattr(xg_ingest, "fetch_matches_xg", fake_xg)
+    monkeypatch.setattr(xg_ingest, "current_season", lambda: NOW.year)
+    monkeypatch.setenv("COMPETITIONS", "DED,PPL")
+    stats = asyncio.run(scenario())
+    cur = f"{NOW.year}/{NOW.year + 1}"
+    assert set(order[:2]) == {("DED", cur), ("PPL", cur)}
+    assert sorted(fetched) == ["91001", "91002", "91003", "91004"] and stats["restant"] == 2
+
+
 def test_sync_command_fails_loudly_without_token(api, capsys):
     """`python -m jobs light` renvoie un code d'erreur si le jeton manque (visible dans le cron)."""
     import jobs

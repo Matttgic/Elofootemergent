@@ -196,6 +196,22 @@ def test_two_feature_logit_recovers_coefficients():
     assert ordered_probs(eta, fit) == outcome_probs(0, fit, xg_diff=0.5)
 
 
+def test_team_map_learned_from_results_is_kept():
+    """Noms trop différents pour la ressemblance : la correspondance apprise sur les
+    résultats (même jour, même score) est gardée telle quelle."""
+    from xg_ingest import team_map
+    names = {1: "Clube Atlético Mineiro", 2: "Red Bull Bragantino", 3: "Atlético-MG B"}
+    fd = [_match(i, f"2026-08-{i:02d}T15:00:00Z", h, a, gh, ga, home={"name": names[h]}, away={"name": names[a]})
+          for i, (h, a, gh, ga) in enumerate([(1, 2, 2, 0), (2, 1, 1, 1), (1, 2, 0, 3), (3, 2, 4, 4)], 1)]
+    source = {1: "Atlético-MG", 2: "RB Bragantino"}
+    fixtures = [{"home": source[m["home_team"]["id"]], "away": source[m["away_team"]["id"]],
+                 "utc": m["utc_date"], "score": (m["score"]["fullTime"]["home"], m["score"]["fullTime"]["away"])}
+                for m in fd[:3]]
+    # « Atlético-MG B » (équipe réserve, absente de la source) ressemble plus au nom de la
+    # source que « Clube Atlético Mineiro », mais les résultats désignent bien l'équipe 1
+    assert team_map(fixtures, fd) == {"Atlético-MG": 1, "RB Bragantino": 2}
+
+
 def test_attach_xg_by_team_names_and_date():
     from xg_ingest import attach_xg_ops
     mci = {"id": 65, "name": "Manchester City FC", "shortName": "Man City"}
