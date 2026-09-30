@@ -200,11 +200,13 @@ def similaires(h, cotes, precision=PRECISION):
     count = [0, 0, 0]
     gain = [0.0, 0.0, 0.0]
     annonce = [0.0, 0.0, 0.0]
+    somme_cotes = [0.0, 0.0, 0.0]
     for i in found:
         y = h.issue(i)
         count[y] += 1
         for k in range(3):
             annonce[k] += h.proba(i, k)
+            somme_cotes[k] += h.cote(i, k)
             gain[k] += (h.cote(i, k) - 1) if y == k else -1
     exact = sum(1 for i in found if all(abs(h.cote(i, k) - cotes[k]) < 0.005 for k in range(3)))
     issues = {}
@@ -220,7 +222,10 @@ def similaires(h, cotes, precision=PRECISION):
             "roi_historique_pct": round(100 * gain[k] / n, 1) if n else None,
         }
     recent = sorted(found, key=lambda i: h.date[i], reverse=True)[:EXEMPLES]
+    # cotes Pinnacle moyennes des matchs trouvés : l'équivalent, marge Pinnacle comprise,
+    # des cotes demandées (plus basses chez un bookmaker qui prend plus de marge)
     return {"precision_pct": precision, "matchs": n, "identiques": exact,
+            "cotes_pinnacle": [round(x / n, 2) for x in somme_cotes] if n else None,
             "suffisant": n >= MIN_MATCHS, "issues": issues,
             "exemples": [_exemple(h, i) for i in recent]}
 

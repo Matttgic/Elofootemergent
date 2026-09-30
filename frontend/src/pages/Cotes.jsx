@@ -68,6 +68,9 @@ function Examples({ rows, testid }) {
         <History className="w-3.5 h-3.5" /> Les {rows.length} plus récents
       </summary>
       <div className="mt-2 space-y-1">
+        <div className="grid grid-cols-[4.5rem_1fr_auto] gap-2 text-[10px] uppercase tracking-wide text-slate-600">
+          <span>Date</span><span>Match</span><span>Cotes Pinnacle 1 / N / 2</span>
+        </div>
         {rows.map((e, i) => (
           <div key={i} className="grid grid-cols-[4.5rem_1fr_auto] gap-2 items-center text-xs py-1 border-b border-slate-800 last:border-0">
             <span className="text-slate-500 font-stat">{frDay(e.date)}</span>
@@ -311,33 +314,50 @@ export default function Cotes() {
 
       {d && !loading && (
         <div className="space-y-4 mb-6" data-testid="cotes-result">
-          <div className="card-surface rounded-xl p-5" data-testid="cotes-similaires">
-            <h2 className="font-head text-lg font-bold text-slate-50">
-              {fmtInt(s.matchs)} matchs aux cotes similaires <span className="text-slate-500 font-normal text-sm">(± {s.precision_pct} % sur chaque cote)</span>
+          <div className="card-surface rounded-xl p-5 border border-emerald-500/20" data-testid="cotes-similaires">
+            <h2 className="font-head text-xl font-bold text-slate-50">
+              {fmtInt(s.matchs)} matchs avec ces cotes
             </h2>
             <p className="text-xs text-slate-500 mt-0.5 mb-3">
-              Cotes sans la marge du bookmaker ({fmt(d.marge_pct)} %) : {fmt(d.probas_cotes.domicile, 0)} % / {fmt(d.probas_cotes.nul, 0)} % / {fmt(d.probas_cotes.exterieur, 0)} %.
-              {" "}Exactement les mêmes cotes : {s.identiques} match{s.identiques > 1 ? "s" : ""}.
+              Matchs passés où les cotes Pinnacle étaient à ± {s.precision_pct} % des tiennes
+              {s.identiques ? <> (dont {s.identiques} aux cotes exactement identiques)</> : null}.
             </p>
-            {d.marge_pct > 8 && (
-              <p className="text-[11px] text-amber-400 mb-3">
-                Marge de {fmt(d.marge_pct)} % : c'est bien plus que Pinnacle (≈ 3 %). La comparaison se fait sans la marge ;
-                ton « rendement à ta cote » en tient compte, lui.
-              </p>
-            )}
             {s.matchs > 0 ? (
               <>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {ISSUES.map(([k, l]) => <IssueCell key={k} label={l} v={s.issues[k]} cote={d.cotes[k]} />)}
+                <div className="grid grid-cols-3 gap-2 text-center" data-testid="cotes-resume">
+                  {[["domicile", "Victoire à domicile", "text-emerald-300"], ["nul", "Match nul", "text-slate-200"],
+                    ["exterieur", "Victoire à l'extérieur", "text-cyan-300"]].map(([k, l, c]) => (
+                    <div key={k} className="rounded-lg bg-slate-900/60 py-3 px-1" data-testid={`resume-${k}`}>
+                      <div className={`font-stat font-black text-3xl sm:text-4xl leading-none ${c}`}>{fmtInt(s.issues[k].matchs)}</div>
+                      <div className="text-[11px] text-slate-300 mt-1.5">{l}</div>
+                      <div className="font-stat text-sm text-slate-400 mt-0.5">{fmt(s.issues[k].reel_pct, 0)} %</div>
+                    </div>
+                  ))}
                 </div>
-                <p className="text-[11px] text-slate-500 mt-3">
-                  <span className="inline-block w-2 h-2 bg-emerald-500/80 rounded-sm mr-1" />réel
-                  <span className="inline-block w-0.5 h-2.5 bg-amber-300 mx-1 ml-3 align-middle" />annoncé par les cotes.
-                  « Rendement à ta cote » : ce que rapporterait un pari de 1 € si la fréquence passée se répétait
-                  exactement (± la marge d'erreur, qui suffit souvent à changer le signe).
-                </p>
-                {!s.suffisant && <p className="mt-2 text-[11px] text-amber-400">Moins de 30 matchs comparables : élargis la précision.</p>}
+                {d.marge_pct > 5 && s.cotes_pinnacle && (
+                  <p className="text-[11px] text-slate-400 mt-3" data-testid="cotes-equivalent">
+                    Tes cotes {[d.cotes.domicile, d.cotes.nul, d.cotes.exterieur].map((c) => fmt(c, 2)).join(" / ")} contiennent{" "}
+                    <b className="text-amber-300">{fmt(d.marge_pct)} % de marge</b> (Pinnacle ≈ 3 %). Pour les mêmes chances,
+                    Pinnacle affichait ≈ <b className="text-slate-200 font-stat">{s.cotes_pinnacle.map((c) => fmt(c, 2)).join(" / ")}</b> :
+                    ce sont ces matchs-là qui sont comptés (aucun match Pinnacle n'a des cotes aussi basses sur les trois issues).
+                  </p>
+                )}
+                {!s.suffisant && <p className="mt-2 text-[11px] text-amber-400">Moins de 30 matchs : élargis la précision, un ou deux résultats de plus changent tout.</p>}
                 <Examples rows={s.exemples} testid="similaires-exemples" />
+                <details className="mt-3" data-testid="similaires-details">
+                  <summary className="cursor-pointer text-xs text-emerald-400 hover:text-emerald-300">
+                    Rentable ou pas ? Détail par issue
+                  </summary>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+                    {ISSUES.map(([k, l]) => <IssueCell key={k} label={l} v={s.issues[k]} cote={d.cotes[k]} />)}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-3">
+                    <span className="inline-block w-2 h-2 bg-emerald-500/80 rounded-sm mr-1" />réel
+                    <span className="inline-block w-0.5 h-2.5 bg-amber-300 mx-1 ml-3 align-middle" />annoncé par les cotes.
+                    « Rendement à ta cote » : ce que rapporterait un pari de 1 € si la fréquence passée se répétait
+                    exactement (± la marge d'erreur, qui suffit souvent à changer le signe).
+                  </p>
+                </details>
               </>
             ) : (
               <p className="text-sm text-slate-400">Aucun match aussi proche : élargis la précision.</p>

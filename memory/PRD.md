@@ -119,3 +119,4 @@ Voir Next Action Items du récap de finish.
 - [x] API : GET /api/cotes/similaires (cotes irréalistes, marge > 20 % ou < −5 %, refusées avec explication), /api/cotes/equipes, /api/cotes/calibration
 - [x] Test à l'aveugle (tools/cotes_historiques.py) : l'historique n'apporte rien aux cotes (log-loss 1,0030 vs 1,0019) ; paris « historique favorable » −3,8 % à −7 % ; surperformance d'une équipe non reproductible (corrélation 0,009) ; combinaison : poids 0. Affiché sur la page (« Et pour gagner de l'argent ? ») avec la calibration par tranche de cote
 - [x] Tests : tests/test_cotes.py (9 tests hors ligne) + parcours Playwright de la page
+- [x] Page « Cotes » simplifiée : le résultat commence par le décompte (N matchs avec ces cotes : X victoires à domicile, Y nuls, Z victoires à l'extérieur) ; si la marge des cotes saisies dépasse 5 %, les cotes Pinnacle équivalentes (moyenne des matchs trouvés, `cotes_pinnacle`) sont affichées ; rentabilité par issue repliée

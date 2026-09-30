@@ -168,8 +168,18 @@ test("cotes : matchs passés aux cotes similaires, équipes et test à l'aveugle
   await page.goto("/match/71");
   await page.getByTestId("detail-odds-history").click();
   await expect(page).toHaveURL(/\/cotes\?domicile=[\d.]+&nul=[\d.]+&exterieur=[\d.]+/);
-  await expect(page.getByTestId("cotes-similaires")).toContainText("matchs aux cotes similaires");
-  await expect(page.getByTestId("cotes-similaires").getByTestId("issue-cell")).toHaveCount(3);
+  await expect(page.getByTestId("cotes-similaires")).toContainText("matchs avec ces cotes");
+  // le décompte d'abord : victoires domicile + nuls + victoires extérieur = nombre de matchs
+  const n = async (id) => Number((await page.getByTestId(id).locator("div").first().innerText()).replace(/\D/g, ""));
+  const total = (await n("resume-domicile")) + (await n("resume-nul")) + (await n("resume-exterieur"));
+  expect(total).toBeGreaterThan(30);
+  expect(String(total)).toBe((await page.getByTestId("cotes-similaires").locator("h2").innerText()).replace(/\D/g, ""));
+  // cotes du jeu de test (marge 7 %) : équivalent Pinnacle affiché ; détail par issue replié
+  await expect(page.getByTestId("cotes-equivalent")).toContainText("Pinnacle affichait");
+  await expect(page.getByTestId("issue-cell").first()).toBeHidden();
+  await page.getByTestId("similaires-details").locator("summary").click();
+  await expect(page.getByTestId("issue-cell")).toHaveCount(3);
+  await expect(page.getByTestId("issue-cell").first()).toBeVisible();
   // exemple avec deux équipes
   await page.getByTestId("cotes-exemple").click();
   await expect(page).toHaveURL(/dom=Paris\+SG/);

@@ -47,6 +47,7 @@ def test_similar_odds_counts_outcomes_and_returns(small):
     assert dom["rendement_pct"] == pytest.approx(-56.7) and dom["roi_historique_pct"] == pytest.approx(-56.7)
     assert ext["roi_historique_pct"] == pytest.approx(100 * (11.0 - 1 - 2) / 3, abs=0.1)
     assert s["suffisant"] is False
+    assert s["cotes_pinnacle"] == [1.30, 5.77, 10.5]      # moyenne des cotes des 3 matchs trouvés
     assert [e["date"] for e in s["exemples"]] == ["2021-01-01", "2020-02-01", "2020-01-01"]
     assert s["exemples"][0] == {"date": "2021-01-01", "ligue": "Serie A", "domicile": "Inter", "exterieur": "Lazio",
                                 "score": "0-1", "cotes": [1.29, 5.9, 11.0]}
@@ -59,7 +60,9 @@ def test_other_bookmaker_margin_is_removed(small):
     # mêmes probabilités avec 8 % de marge (cotes d'un bookmaker français) : mêmes voisins
     q, _ = ch.fair_probs((1.30, 5.75, 10.5))
     cotes = tuple(round(1 / (x * 1.08), 3) for x in q)
-    assert ch.similaires(small, cotes)["matchs"] == 3
+    s = ch.similaires(small, cotes)
+    assert s["matchs"] == 3 and s["cotes_pinnacle"][0] > cotes[0]     # cotes Pinnacle plus hautes (moins de marge)
+    assert ch.similaires(small, (1.80, 3.60, 4.20))["cotes_pinnacle"] is None
 
 
 def test_team_at_similar_win_odds_any_venue(small):
